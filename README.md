@@ -10,9 +10,12 @@ The project is designed for fast day-to-day access to Home Assistant entities wi
 - configurable human-readable binary sensor states
 - brightness control for dimmable lights
 - an interactive Textual TUI
+- complete alias lifecycle from both CLI and TUI
+- alias health checks against Home Assistant
+- alias-aware shell completion
 - local configuration and credentials kept outside the Git repository
 
-The current implementation is at the Sprint 5 MVP stage.
+The current implementation is at the Sprint 6 daily-use stage.
 
 ## Requirements
 
@@ -195,11 +198,40 @@ garage-effekt
 
 Aliases containing characters such as `å`, `ä`, and `ö` should be quoted in TOML.
 
+### Managing aliases from the CLI
+
+Create or change an alias:
+
+```bash
+hactl alias veranda light.veranda
+```
+
+Remove an alias:
+
+```bash
+hactl unalias veranda
+```
+
+When an entity is assigned a new alias, any previous alias pointing to that same entity is removed automatically.
+
 ### Listing aliases
 
 ```bash
 hactl aliases
 ```
+
+Validate every configured alias against the current Home Assistant entity list:
+
+```bash
+hactl aliases --check
+```
+
+The status column reports:
+
+- `ok` when the entity exists and has a normal state
+- `unavailable` when Home Assistant currently reports it as unavailable
+- `unknown` when Home Assistant reports an unknown state
+- `missing` when the configured entity ID no longer exists
 
 Example output:
 
@@ -224,7 +256,9 @@ The complete CLI currently consists of:
 | Brightness | `hactl brightness NAME PERCENT` | Set a light to 0-100% |
 | Find | `hactl find SEARCH` | Search Home Assistant entities |
 | Entities | `hactl entities [OPTIONS]` | List entities |
-| Aliases | `hactl aliases` | List configured aliases |
+| Alias | `hactl alias ALIAS ENTITY_ID` | Create or change an alias |
+| Unalias | `hactl unalias ALIAS` | Remove an alias |
+| Aliases | `hactl aliases [--check]` | List aliases and optionally validate targets |
 | TUI | `hactl tui` | Start the interactive terminal interface |
 
 Every command has generated Typer help:
@@ -516,6 +550,31 @@ If no matching mapping and no `default` mapping exist, hactl keeps the raw Home 
 
 Only `on` and `off` keys are accepted in `binary_sensor_states`.
 
+## Shell completion
+
+hactl uses Typer's shell completion support. Install completion for the active shell with:
+
+```bash
+hactl --install-completion
+```
+
+After restarting the shell, hactl can complete command names, options, and configured aliases.
+
+For example:
+
+```text
+hactl status ver<TAB>
+hactl unalias var<TAB>
+```
+
+The alias completion source is `[aliases]` in the active hactl configuration.
+
+Typer also supports showing the generated completion script without installing it:
+
+```bash
+hactl --show-completion
+```
+
 ## Interactive TUI
 
 Start the Textual interface with:
@@ -609,6 +668,8 @@ Lights that explicitly report only `onoff` capability are treated as non-dimmabl
 | `/` | Focus search |
 | `Esc` | Return focus to entity list |
 | `a` | Add or change alias for selected entity |
+| `d` | Remove the selected entity's alias after confirmation |
+| `s` | Cycle sort order: alias, name, state, entity |
 | `Space` | Toggle selected light or switch |
 | `o` | Turn selected light or switch on |
 | `f` | Turn selected light or switch off |
@@ -642,6 +703,10 @@ If the entity already has an alias, the dialog is pre-filled so the alias can be
 An alias already assigned to another entity is rejected.
 
 When an entity is renamed to a new alias, the old alias for that same entity is removed.
+
+To remove an alias from the TUI, select the entity and press `d`. hactl asks for confirmation before changing `config.toml`.
+
+Press `s` to cycle the entity list sort order through alias, friendly name, state, and entity ID.
 
 ### Safe config updates
 
@@ -854,10 +919,14 @@ so changes in the source tree are immediately available to the installed command
 
 ## Current scope
 
-The Sprint 5 MVP currently focuses on:
+The Sprint 6 implementation currently focuses on:
 
 - Home Assistant entity discovery
-- friendly aliases
+- full alias lifecycle from CLI and TUI
+- alias target validation
+- shell completion for configured aliases
+- explicit unavailable/unknown state display
+- TUI sorting
 - lights
 - switches
 - sensors
@@ -882,6 +951,7 @@ Future functionality should keep the same design principles:
 After installation and configuration:
 
 ```bash
+hactl alias veranda light.veranda
 hactl status veranda
 hactl on veranda
 hactl brightness veranda 50
@@ -889,5 +959,6 @@ hactl status vardagsrum-temp
 hactl entities -d sensor -c temperature
 hactl find temperature
 hactl aliases
+hactl aliases --check
 hactl tui
 ```
