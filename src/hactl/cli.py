@@ -52,6 +52,26 @@ def entity_domain(entity_id: str) -> str:
     return entity_id.split(".", 1)[0]
 
 
+def format_state_value(state: dict) -> str:
+    value = str(state.get("state", ""))
+    unit = state.get(
+        "attributes",
+        {},
+    ).get("unit_of_measurement")
+
+    if unit:
+        return f"{value} {unit}"
+
+    return value
+
+
+def get_device_class(state: dict) -> str | None:
+    return state.get(
+        "attributes",
+        {},
+    ).get("device_class")
+
+
 def wait_for_state(
     client: HomeAssistantClient,
     entity_id: str,
@@ -236,8 +256,15 @@ def status(name: str):
         )
 
         console.print(
-            f"State:  {state['state']}"
+            f"State:  {format_state_value(state)}"
         )
+
+        device_class = attributes.get("device_class")
+
+        if device_class:
+            console.print(
+                f"Device class: {device_class}"
+            )
 
         if "brightness" in attributes:
             brightness = attributes["brightness"]
@@ -416,19 +443,36 @@ def find(search: str):
 
         for state in states:
             entity_id = state["entity_id"]
-
-            friendly_name = state.get(
+            attributes = state.get(
                 "attributes",
                 {},
-            ).get(
+            )
+
+            friendly_name = attributes.get(
                 "friendly_name",
                 "",
             )
+            device_class = attributes.get(
+                "device_class",
+                "",
+            )
+            unit = attributes.get(
+                "unit_of_measurement",
+                "",
+            )
 
-            if (
-                search_lower in entity_id.lower()
-                or search_lower in friendly_name.lower()
-            ):
+            searchable = " ".join(
+                str(value)
+                for value in (
+                    entity_id,
+                    friendly_name,
+                    device_class,
+                    unit,
+                )
+                if value
+            ).lower()
+
+            if search_lower in searchable:
                 matches.append(state)
 
         table = Table()
@@ -440,7 +484,7 @@ def find(search: str):
         for state in matches:
             table.add_row(
                 state["entity_id"],
-                str(state["state"]),
+                format_state_value(state),
                 state.get(
                     "attributes",
                     {},
@@ -463,6 +507,35 @@ def find(search: str):
 
 
 @app.command()
+def aliases():
+    """List configured aliases."""
+
+    try:
+        config = load_config()
+    except ConfigError as exc:
+        console.print(
+            f"[red]Configuration error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    table = Table()
+
+    table.add_column("Alias")
+    table.add_column("Entity")
+
+    for alias, entity_id in sorted(
+        config.aliases.items(),
+        key=lambda item: item[0].casefold(),
+    ):
+        table.add_row(
+            alias,
+            entity_id,
+        )
+
+    console.print(table)
+
+
+@app.command()
 def entities(
     domain: str | None = typer.Option(
         None,
@@ -470,8 +543,14 @@ def entities(
         "-d",
         help="Only list entities from this Home Assistant domain, e.g. light.",
     ),
+    device_class: str | None = typer.Option(
+        None,
+        "--class",
+        "-c",
+        help="Only list entities with this device class, e.g. temperature.",
+    ),
 ):
-    """List Home Assistant entities, optionally filtered by domain."""
+    """List Home Assistant entities, optionally filtered by domain or class."""
 
     _, client = get_client()
 
@@ -493,6 +572,23 @@ def entities(
                 )
             ]
 
+        if device_class:
+            normalized_class = device_class.lower()
+
+            states = [
+                state
+                for state in states
+                if str(
+                    state.get(
+                        "attributes",
+                        {},
+                    ).get(
+                        "device_class",
+                        "",
+                    )
+                ).lower() == normalized_class
+            ]
+
         table = Table()
 
         table.add_column("Entity")
@@ -505,7 +601,7 @@ def entities(
         ):
             table.add_row(
                 state["entity_id"],
-                str(state["state"]),
+                format_state_value(state),
                 state.get(
                     "attributes",
                     {},
