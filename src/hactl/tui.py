@@ -18,6 +18,8 @@ from hactl.cli import (
     entity_domain,
     format_state_value,
     get_brightness_percent,
+    wait_for_brightness,
+    wait_for_state,
 )
 
 
@@ -149,6 +151,7 @@ class HactlApp(App):
         )
 
         self.refresh_states()
+        table.focus()
 
     def on_unmount(self) -> None:
         self.client.close()
@@ -283,6 +286,15 @@ class HactlApp(App):
 
         if self.selected_entity_id not in visible_ids:
             self.selected_entity_id = visible[0]["entity_id"]
+
+        selected_row = table.get_row_index(
+            self.selected_entity_id
+        )
+        table.move_cursor(
+            row=selected_row,
+            column=0,
+            animate=False,
+        )
 
         self.update_details()
 
@@ -468,19 +480,53 @@ class HactlApp(App):
             )
             return
 
+        current_value = state.get("state")
+        expected_state = None
+
+        if service == "turn_on":
+            expected_state = "on"
+        elif service == "turn_off":
+            expected_state = "off"
+        elif (
+            service == "toggle"
+            and current_value in {"on", "off"}
+        ):
+            expected_state = (
+                "off"
+                if current_value == "on"
+                else "on"
+            )
+
         try:
             self.client.call_service(
                 domain,
                 service,
                 entity_id,
             )
+
+            if expected_state is not None:
+                latest_state, confirmed = wait_for_state(
+                    self.client,
+                    entity_id,
+                    expected_state,
+                )
+                self.states[entity_id] = latest_state
+
+                if not confirmed:
+                    self.refresh_table()
+                    self.set_status(
+                        f"Command accepted, but {entity_id} "
+                        f"still reports {latest_state.get('state')}"
+                    )
+                    return
+
         except HomeAssistantError as exc:
             self.set_status(f"Error: {exc}")
             return
 
         self.refresh_states(entity_id)
         self.set_status(
-            f"{service} sent to {entity_id}"
+            f"{service} confirmed for {entity_id}"
         )
 
     def change_brightness(
@@ -550,13 +596,29 @@ class HactlApp(App):
                         "brightness_pct": target,
                     },
                 )
+
+            latest_state, confirmed = wait_for_brightness(
+                self.client,
+                entity_id,
+                target,
+            )
+            self.states[entity_id] = latest_state
+
         except HomeAssistantError as exc:
             self.set_status(f"Error: {exc}")
             return
 
+        if not confirmed:
+            self.refresh_table()
+            self.set_status(
+                f"Brightness command accepted, but {entity_id} "
+                "has not confirmed the target yet"
+            )
+            return
+
         self.refresh_states(entity_id)
         self.set_status(
-            f"Brightness {target}% sent to {entity_id}"
+            f"Brightness {target}% confirmed for {entity_id}"
         )
 
     def action_focus_search(self) -> None:
