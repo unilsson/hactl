@@ -28,6 +28,11 @@ veranda = "light.veranda"
 "dagbädden" = "light.example_dagbadd"
 "vardagsrum-temp" = "sensor.vardagsrum_temperature"
 "kök-fukt" = "sensor.kok_humidity"
+"ytterdörr" = "binary_sensor.ytterdorr"
+
+[binary_sensor_states.door]
+on = "öppen"
+off = "stängd"
 ```
 
 For sensor aliases, prefer the pattern `<place>-<type>`, for example `vardagsrum-temp`, `ute-temp`, and `kök-fukt`. Quote aliases containing Swedish characters such as å, ä, and ö.
@@ -88,6 +93,57 @@ List configured aliases:
 ```bash
 hactl aliases
 ```
+
+## Binary sensors
+
+Binary sensors such as doors, windows, motion detectors, and occupancy sensors can be listed and inspected like any other entity:
+
+```bash
+hactl entities -d binary_sensor
+hactl entities -d binary_sensor -c door
+hactl status ytterdörr
+```
+
+Home Assistant stores binary sensor state as `on` or `off`. hactl can map those raw values to human-readable labels based on the entity's `device_class`.
+
+For door sensors:
+
+```toml
+[binary_sensor_states.door]
+on = "öppen"
+off = "stängd"
+```
+
+With that configuration:
+
+```text
+Ytterdörr
+Entity: binary_sensor.ytterdorr
+State:  öppen
+Device class: door
+```
+
+Mappings are configurable per device class, so other binary sensor types can use different words:
+
+```toml
+[binary_sensor_states.window]
+on = "öppet"
+off = "stängt"
+
+[binary_sensor_states.motion]
+on = "rörelse"
+off = "ingen rörelse"
+```
+
+An optional fallback can be configured for binary sensors without a matching device class:
+
+```toml
+[binary_sensor_states.default]
+on = "aktiv"
+off = "inaktiv"
+```
+
+If no mapping is configured, hactl keeps the raw Home Assistant state `on` / `off`.
 
 ## Brightness
 
