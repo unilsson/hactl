@@ -163,9 +163,11 @@ hactl tui
 
 The MVP includes:
 
+- a curated default view that shows only entities configured under `[aliases]`
+- an explicit `All` filter for browsing every Home Assistant entity
 - entity list with alias, entity ID, state, and friendly name
 - live search across aliases, entity IDs, friendly names, and device classes
-- filters for lights, sensors, binary sensors, and switches
+- filters for aliased entities, all entities, lights, sensors, binary sensors, and switches
 - detail view for the selected entity
 - read-only display for sensors and binary sensors
 - on/off/toggle for lights and switches
