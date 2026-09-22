@@ -145,6 +145,50 @@ off = "inaktiv"
 
 If no mapping is configured, hactl keeps the raw Home Assistant state `on` / `off`.
 
+## TUI
+
+Sprint 5 adds an interactive terminal interface powered by Textual.
+
+After switching to the Sprint 5 branch, reinstall the editable package so the new dependency is installed:
+
+```bash
+pip install -e .
+```
+
+Start the interface with:
+
+```bash
+hactl tui
+```
+
+The MVP includes:
+
+- entity list with alias, entity ID, state, and friendly name
+- live search across aliases, entity IDs, friendly names, and device classes
+- filters for lights, sensors, binary sensors, and switches
+- detail view for the selected entity
+- read-only display for sensors and binary sensors
+- on/off/toggle for lights and switches
+- brightness changes in 10 percent steps for dimmable lights
+- binary sensor state mappings from `config.toml`
+- refresh with `r`
+
+Keyboard controls:
+
+```text
+/       focus search
+Esc     focus entity list
+Space   toggle selected light/switch
+o       turn selected light/switch on
+f       turn selected light/switch off
++       brightness +10%
+-       brightness -10%
+r       refresh
+q       quit
+```
+
+The TUI deliberately keeps sensor entities read-only and reuses the same Home Assistant client, aliases, binary sensor mappings, and state confirmation logic as the CLI.
+
 ## Brightness
 
 Set a dimmable light from 0 to 100 percent:
