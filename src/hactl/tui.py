@@ -273,12 +273,14 @@ class HactlApp(App):
         margin: 1 1 0 1;
     }
 
-    #filters {
+    #filters,
+    #action-filters {
         height: auto;
         margin: 0 1;
     }
 
-    #filters Button {
+    #filters Button,
+    #action-filters Button {
         margin-right: 1;
     }
 
@@ -365,6 +367,8 @@ class HactlApp(App):
             yield Button("Sensors", id="filter-sensor")
             yield Button("Binary", id="filter-binary_sensor")
             yield Button("Switches", id="filter-switch")
+
+        with Horizontal(id="action-filters"):
             yield Button("Scenes", id="filter-scene")
             yield Button("Scripts", id="filter-script")
             yield Button("Automations", id="filter-automation")
@@ -728,10 +732,14 @@ class HactlApp(App):
                 self.domain_filter = filter_name
                 label = filter_name
 
-            for button in self.query(
-                "#filters Button"
+            for selector in (
+                "#filters Button",
+                "#action-filters Button",
             ):
-                button.variant = "default"
+                for button in self.query(
+                    selector
+                ):
+                    button.variant = "default"
 
             self.query_one(
                 f"#filter-{filter_name}",
