@@ -1,3 +1,5 @@
+import time
+
 import typer
 
 from rich.console import Console
@@ -50,6 +52,76 @@ def entity_domain(entity_id: str) -> str:
     return entity_id.split(".", 1)[0]
 
 
+def wait_for_state(
+    client: HomeAssistantClient,
+    entity_id: str,
+    expected_state: str,
+    timeout: float = 2.0,
+    interval: float = 0.1,
+) -> tuple[dict, bool]:
+    deadline = time.monotonic() + timeout
+    state = client.get_state(entity_id)
+
+    while True:
+        if state.get("state") == expected_state:
+            return state, True
+
+        if time.monotonic() >= deadline:
+            return state, False
+
+        time.sleep(interval)
+        state = client.get_state(entity_id)
+
+
+def get_brightness_percent(state: dict) -> int | None:
+    attributes = state.get(
+        "attributes",
+        {},
+    )
+
+    brightness = attributes.get("brightness")
+
+    if brightness is not None:
+        return round(
+            brightness / 255 * 100
+        )
+
+    if state.get("state") == "off":
+        return 0
+
+    return None
+
+
+def wait_for_brightness(
+    client: HomeAssistantClient,
+    entity_id: str,
+    target_percent: int,
+    timeout: float = 2.0,
+    interval: float = 0.1,
+) -> tuple[dict, bool]:
+    deadline = time.monotonic() + timeout
+    state = client.get_state(entity_id)
+
+    while True:
+        actual_percent = get_brightness_percent(state)
+
+        if target_percent == 0:
+            if state.get("state") == "off":
+                return state, True
+        elif (
+            state.get("state") == "on"
+            and actual_percent is not None
+            and abs(actual_percent - target_percent) <= 1
+        ):
+            return state, True
+
+        if time.monotonic() >= deadline:
+            return state, False
+
+        time.sleep(interval)
+        state = client.get_state(entity_id)
+
+
 def call_entity_service(
     name: str,
     service: str,
@@ -63,6 +135,21 @@ def call_entity_service(
 
     try:
         domain = entity_domain(entity_id)
+        current_state = client.get_state(entity_id)
+        current_value = current_state.get("state")
+
+        expected_state = None
+
+        if service == "turn_on":
+            expected_state = "on"
+        elif service == "turn_off":
+            expected_state = "off"
+        elif service == "toggle" and current_value in {"on", "off"}:
+            expected_state = (
+                "off"
+                if current_value == "on"
+                else "on"
+            )
 
         client.call_service(
             domain,
@@ -70,7 +157,15 @@ def call_entity_service(
             entity_id,
         )
 
-        state = client.get_state(entity_id)
+        if expected_state is not None:
+            state, confirmed = wait_for_state(
+                client,
+                entity_id,
+                expected_state,
+            )
+        else:
+            state = client.get_state(entity_id)
+            confirmed = True
 
         friendly_name = state.get(
             "attributes",
@@ -80,12 +175,20 @@ def call_entity_service(
             entity_id,
         )
 
-        console.print(
-            f"[green]✓[/green] "
-            f"{friendly_name} "
-            f"({entity_id}) → "
-            f"{state['state']}"
-        )
+        if confirmed:
+            console.print(
+                f"[green]✓[/green] "
+                f"{friendly_name} "
+                f"({entity_id}) → "
+                f"{state['state']}"
+            )
+        else:
+            console.print(
+                f"[yellow]Warning:[/yellow] "
+                f"Home Assistant accepted the command, but "
+                f"{friendly_name} ({entity_id}) still reports "
+                f"{state['state']}."
+            )
 
     except (
         HomeAssistantError,
@@ -185,6 +288,117 @@ def toggle(name: str):
         name,
         "toggle",
     )
+
+
+@app.command()
+def brightness(name: str, percent: int):
+    """Set light brightness from 0 to 100 percent."""
+
+    if percent < 0 or percent > 100:
+        console.print(
+            "[red]Error:[/red] Brightness must be between 0 and 100."
+        )
+        raise typer.Exit(1)
+
+    config, client = get_client()
+
+    entity_id = resolve_entity(
+        name,
+        config.aliases,
+    )
+
+    try:
+        if entity_domain(entity_id) != "light":
+            raise ValueError(
+                f"{entity_id} is not a light entity"
+            )
+
+        current_state = client.get_state(entity_id)
+        current_attributes = current_state.get(
+            "attributes",
+            {},
+        )
+
+        supported_color_modes = set(
+            current_attributes.get(
+                "supported_color_modes",
+                [],
+            )
+            or []
+        )
+
+        if supported_color_modes == {"onoff"}:
+            raise ValueError(
+                f"{entity_id} does not support brightness control"
+            )
+
+        if percent == 0:
+            client.call_service(
+                "light",
+                "turn_off",
+                entity_id,
+            )
+        else:
+            client.call_service(
+                "light",
+                "turn_on",
+                entity_id,
+                {
+                    "brightness_pct": percent,
+                },
+            )
+
+        state, confirmed = wait_for_brightness(
+            client,
+            entity_id,
+            percent,
+        )
+
+        attributes = state.get(
+            "attributes",
+            {},
+        )
+
+        friendly_name = attributes.get(
+            "friendly_name",
+            entity_id,
+        )
+
+        actual_percent = get_brightness_percent(state)
+
+        if confirmed:
+            console.print(
+                f"[green]✓[/green] "
+                f"{friendly_name} "
+                f"({entity_id}) → "
+                f"{state['state']}, "
+                f"brightness {actual_percent}%"
+            )
+        else:
+            reported = (
+                f", brightness {actual_percent}%"
+                if actual_percent is not None
+                else ""
+            )
+
+            console.print(
+                f"[yellow]Warning:[/yellow] "
+                f"Home Assistant accepted the command, but "
+                f"{friendly_name} ({entity_id}) still reports "
+                f"{state['state']}{reported}."
+            )
+
+    except (
+        HomeAssistantError,
+        ValueError,
+    ) as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    finally:
+        client.close()
 
 
 @app.command()
