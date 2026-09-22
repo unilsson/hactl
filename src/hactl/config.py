@@ -2,7 +2,10 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import stat
+import tempfile
 import tomllib
+
+import tomlkit
 
 
 class ConfigError(Exception):
@@ -24,6 +27,121 @@ def get_config_dir() -> Path:
         return Path(xdg_config_home) / "hactl"
 
     return Path.home() / ".config" / "hactl"
+
+
+def set_alias(
+    alias: str,
+    entity_id: str,
+) -> dict[str, str]:
+    alias = alias.strip()
+
+    if not alias:
+        raise ConfigError("Alias cannot be empty")
+
+    if "\n" in alias or "\r" in alias:
+        raise ConfigError("Alias cannot contain line breaks")
+
+    if not entity_id or "." not in entity_id:
+        raise ConfigError(
+            f"Invalid entity ID: {entity_id}"
+        )
+
+    config_file = get_config_dir() / "config.toml"
+
+    if not config_file.exists():
+        raise ConfigError(
+            f"Configuration file not found: {config_file}"
+        )
+
+    try:
+        document = tomlkit.parse(
+            config_file.read_text(
+                encoding="utf-8"
+            )
+        )
+    except Exception as exc:
+        raise ConfigError(
+            f"Could not parse {config_file}: {exc}"
+        ) from exc
+
+    aliases = document.get("aliases")
+
+    if aliases is None:
+        aliases = tomlkit.table()
+        document["aliases"] = aliases
+
+    if not hasattr(aliases, "items"):
+        raise ConfigError(
+            "'aliases' must be a TOML table"
+        )
+
+    existing_target = aliases.get(alias)
+
+    if (
+        existing_target is not None
+        and str(existing_target) != entity_id
+    ):
+        raise ConfigError(
+            f"Alias '{alias}' is already assigned to "
+            f"{existing_target}"
+        )
+
+    for existing_alias, target in list(
+        aliases.items()
+    ):
+        if (
+            str(target) == entity_id
+            and str(existing_alias) != alias
+        ):
+            del aliases[existing_alias]
+
+    aliases[alias] = entity_id
+
+    temp_path = None
+
+    try:
+        mode = stat.S_IMODE(
+            config_file.stat().st_mode
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=config_file.parent,
+            prefix=".config.toml.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            temp_file.write(
+                tomlkit.dumps(document)
+            )
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        os.chmod(temp_path, mode)
+        os.replace(
+            temp_path,
+            config_file,
+        )
+        temp_path = None
+
+    except OSError as exc:
+        raise ConfigError(
+            f"Could not update {config_file}: {exc}"
+        ) from exc
+
+    finally:
+        if (
+            temp_path is not None
+            and temp_path.exists()
+        ):
+            temp_path.unlink()
+
+    return {
+        str(key): str(value)
+        for key, value in aliases.items()
+    }
 
 
 def load_config() -> Config:
