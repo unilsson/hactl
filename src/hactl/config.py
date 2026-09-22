@@ -49,8 +49,13 @@ def load_config() -> Config:
             f"Run: chmod 600 {credentials_file}"
         )
 
-    with config_file.open("rb") as f:
-        data = tomllib.load(f)
+    try:
+        with config_file.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(
+            f"Invalid TOML in {config_file}: {exc}"
+        ) from exc
 
     url = data.get("url")
 
