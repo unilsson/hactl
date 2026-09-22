@@ -1018,8 +1018,13 @@ def entities(
         "-c",
         help="Only list entities with this device class, e.g. temperature.",
     ),
+    aliased: bool = typer.Option(
+        False,
+        "--aliased",
+        help="Only list entities configured under [aliases].",
+    ),
 ):
-    """List Home Assistant entities, optionally filtered by domain or class."""
+    """List Home Assistant entities with optional filters."""
 
     config, client = get_client()
 
@@ -1058,7 +1063,22 @@ def entities(
                 ).lower() == normalized_class
             ]
 
+        alias_by_entity = {
+            entity_id: alias
+            for alias, entity_id in config.aliases.items()
+        }
+
+        if aliased:
+            states = [
+                state
+                for state in states
+                if state["entity_id"] in alias_by_entity
+            ]
+
         table = Table()
+
+        if aliased:
+            table.add_column("Alias")
 
         table.add_column("Entity")
         table.add_column("State")
@@ -1068,20 +1088,34 @@ def entities(
             states,
             key=lambda item: item["entity_id"],
         ):
-            table.add_row(
-                state["entity_id"],
-                format_state_value(
-                    state,
-                    config.binary_sensor_states,
-                ),
-                state.get(
-                    "attributes",
-                    {},
-                ).get(
-                    "friendly_name",
-                    "",
-                ),
+            row = []
+
+            if aliased:
+                row.append(
+                    alias_by_entity.get(
+                        state["entity_id"],
+                        "",
+                    )
+                )
+
+            row.extend(
+                [
+                    state["entity_id"],
+                    format_state_value(
+                        state,
+                        config.binary_sensor_states,
+                    ),
+                    state.get(
+                        "attributes",
+                        {},
+                    ).get(
+                        "friendly_name",
+                        "",
+                    ),
+                ]
             )
+
+            table.add_row(*row)
 
         console.print(table)
 
