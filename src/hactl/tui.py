@@ -97,6 +97,7 @@ class HactlApp(App):
         self.states: dict[str, dict] = {}
         self.search_query = ""
         self.domain_filter: str | None = None
+        self.aliases_only = True
         self.selected_entity_id: str | None = None
 
         self.alias_by_entity = {
@@ -113,7 +114,12 @@ class HactlApp(App):
         )
 
         with Horizontal(id="filters"):
-            yield Button("All", id="filter-all", variant="primary")
+            yield Button(
+                "Aliased",
+                id="filter-aliased",
+                variant="primary",
+            )
+            yield Button("All", id="filter-all")
             yield Button("Lights", id="filter-light")
             yield Button("Sensors", id="filter-sensor")
             yield Button("Binary", id="filter-binary_sensor")
@@ -166,6 +172,12 @@ class HactlApp(App):
 
         for state in self.states.values():
             entity_id = state["entity_id"]
+
+            if (
+                self.aliases_only
+                and entity_id not in self.alias_by_entity
+            ):
+                continue
 
             if self.domain_filter:
                 if not entity_id.startswith(
@@ -238,8 +250,12 @@ class HactlApp(App):
 
         self.refresh_table()
 
+        visible_count = len(
+            self.visible_states()
+        )
         self.set_status(
-            f"Loaded {len(self.states)} entities"
+            f"Loaded {len(self.states)} entities; "
+            f"showing {visible_count} aliased entities"
         )
 
     def refresh_table(self) -> None:
@@ -403,21 +419,24 @@ class HactlApp(App):
         button_id = event.button.id or ""
 
         if button_id.startswith("filter-"):
-            domain = button_id.removeprefix(
+            filter_name = button_id.removeprefix(
                 "filter-"
             )
-            self.domain_filter = (
-                None
-                if domain == "all"
-                else domain
-            )
-            self.refresh_table()
 
-            label = (
-                "all"
-                if self.domain_filter is None
-                else self.domain_filter
-            )
+            if filter_name == "aliased":
+                self.aliases_only = True
+                self.domain_filter = None
+                label = "aliased entities"
+            elif filter_name == "all":
+                self.aliases_only = False
+                self.domain_filter = None
+                label = "all entities"
+            else:
+                self.aliases_only = False
+                self.domain_filter = filter_name
+                label = filter_name
+
+            self.refresh_table()
             self.set_status(
                 f"Filter: {label}"
             )
