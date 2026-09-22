@@ -145,6 +145,57 @@ off = "inaktiv"
 
 If no mapping is configured, hactl keeps the raw Home Assistant state `on` / `off`.
 
+## TUI
+
+Sprint 5 adds an interactive terminal interface powered by Textual.
+
+After switching to the Sprint 5 branch, reinstall the editable package so the new dependency is installed:
+
+```bash
+pip install -e .
+```
+
+Start the interface with:
+
+```bash
+hactl tui
+```
+
+The MVP includes:
+
+- a curated default view that shows only entities configured under `[aliases]`
+- an explicit `All` filter for browsing every Home Assistant entity
+- entity list with alias, entity ID, state, and friendly name
+- live search across aliases, entity IDs, friendly names, and device classes
+- filters for aliased entities, all entities, lights, sensors, binary sensors, and switches
+- detail view for the selected entity
+- read-only display for sensors and binary sensors
+- on/off/toggle for lights and switches
+- brightness changes in 10 percent steps for dimmable lights
+- binary sensor state mappings from `config.toml`
+- add or rename aliases directly from the TUI with `a`
+- atomic updates of `config.toml` while preserving TOML comments and formatting
+- refresh with `r`
+
+Keyboard controls:
+
+```text
+/       focus search
+Esc     focus entity list
+a       add/change alias for selected entity
+Space   toggle selected light/switch
+o       turn selected light/switch on
+f       turn selected light/switch off
++       brightness +10%
+-       brightness -10%
+r       refresh
+q       quit
+```
+
+The TUI deliberately keeps sensor entities read-only and reuses the same Home Assistant client, aliases, binary sensor mappings, and state confirmation logic as the CLI.
+
+To add an alias without editing the config file manually, select an entity (typically from `All`) and press `a`. Enter the alias and save. The alias is written to `~/.config/hactl/config.toml` and appears immediately in the `Aliased` view. If an entity already has an alias, the dialog is pre-filled so it can be renamed. An alias already assigned to another entity is rejected.
+
 ## Brightness
 
 Set a dimmable light from 0 to 100 percent:
