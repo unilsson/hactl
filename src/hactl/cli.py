@@ -52,12 +52,38 @@ def entity_domain(entity_id: str) -> str:
     return entity_id.split(".", 1)[0]
 
 
-def format_state_value(state: dict) -> str:
+def format_state_value(
+    state: dict,
+    binary_sensor_states: dict[str, dict[str, str]] | None = None,
+) -> str:
     value = str(state.get("state", ""))
-    unit = state.get(
+    attributes = state.get(
         "attributes",
         {},
-    ).get("unit_of_measurement")
+    )
+
+    entity_id = str(state.get("entity_id", ""))
+
+    if (
+        entity_id.startswith("binary_sensor.")
+        and value in {"on", "off"}
+        and binary_sensor_states
+    ):
+        device_class = attributes.get("device_class")
+        mapping = None
+
+        if device_class:
+            mapping = binary_sensor_states.get(
+                str(device_class)
+            )
+
+        if mapping is None:
+            mapping = binary_sensor_states.get("default")
+
+        if mapping:
+            value = mapping.get(value, value)
+
+    unit = attributes.get("unit_of_measurement")
 
     if unit:
         return f"{value} {unit}"
@@ -256,7 +282,7 @@ def status(name: str):
         )
 
         console.print(
-            f"State:  {format_state_value(state)}"
+            f"State:  {format_state_value(state, config.binary_sensor_states)}"
         )
 
         device_class = attributes.get("device_class")
@@ -432,7 +458,7 @@ def brightness(name: str, percent: int):
 def find(search: str):
     """Search Home Assistant entities."""
 
-    _, client = get_client()
+    config, client = get_client()
 
     try:
         states = client.get_states()
@@ -484,7 +510,10 @@ def find(search: str):
         for state in matches:
             table.add_row(
                 state["entity_id"],
-                format_state_value(state),
+                format_state_value(
+                    state,
+                    config.binary_sensor_states,
+                ),
                 state.get(
                     "attributes",
                     {},
@@ -552,7 +581,7 @@ def entities(
 ):
     """List Home Assistant entities, optionally filtered by domain or class."""
 
-    _, client = get_client()
+    config, client = get_client()
 
     try:
         states = client.get_states()
@@ -601,7 +630,10 @@ def entities(
         ):
             table.add_row(
                 state["entity_id"],
-                format_state_value(state),
+                format_state_value(
+                    state,
+                    config.binary_sensor_states,
+                ),
                 state.get(
                     "attributes",
                     {},
