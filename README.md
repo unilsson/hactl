@@ -428,6 +428,7 @@ hactl entities --domain DOMAIN
 hactl entities -d DOMAIN
 hactl entities --class DEVICE_CLASS
 hactl entities -c DEVICE_CLASS
+hactl entities --aliased
 ```
 
 Options:
@@ -436,6 +437,7 @@ Options:
 |---|---|---|
 | `--domain DOMAIN` | `-d DOMAIN` | Only show entities from a Home Assistant domain |
 | `--class DEVICE_CLASS` | `-c DEVICE_CLASS` | Only show entities with a particular device class |
+| `--aliased` | — | Only show entities configured under `[aliases]` |
 
 Examples:
 
@@ -446,7 +448,10 @@ hactl entities --domain sensor
 hactl entities -d binary_sensor
 hactl entities -d sensor --class temperature
 hactl entities -d sensor -c temperature
+hactl entities --aliased -c door
 hactl entities -d binary_sensor -c door
+hactl entities --aliased
+hactl entities --aliased -c door
 ```
 
 The domain filter also tolerates forms such as:
@@ -455,7 +460,16 @@ The domain filter also tolerates forms such as:
 hactl entities -d 'light.*'
 ```
 
-The output is sorted by entity ID.
+The output is sorted by entity ID. When `--aliased` is used, an additional `Alias` column is shown.
+
+Filters can be combined. For example:
+
+```bash
+hactl entities --aliased -c door
+hactl entities --aliased -d sensor -c temperature
+```
+
+This makes it possible to inspect only the curated entities you have added to `[aliases]`.
 
 ## Scenes, scripts, and automations
 
