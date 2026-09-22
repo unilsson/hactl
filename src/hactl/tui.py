@@ -2,18 +2,24 @@ from __future__ import annotations
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Grid, Horizontal
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     DataTable,
     Footer,
     Header,
     Input,
+    Label,
     Static,
 )
 
 from hactl.client import HomeAssistantClient, HomeAssistantError
-from hactl.config import Config
+from hactl.config import (
+    Config,
+    ConfigError,
+    set_alias,
+)
 from hactl.cli import (
     entity_domain,
     format_state_value,
@@ -21,6 +27,163 @@ from hactl.cli import (
     wait_for_brightness,
     wait_for_state,
 )
+
+
+class AliasScreen(ModalScreen[str | None]):
+    """Dialog for adding or changing an hactl alias."""
+
+    CSS = """
+    AliasScreen {
+        align: center middle;
+    }
+
+    #alias-dialog {
+        grid-size: 2;
+        grid-gutter: 1 2;
+        grid-rows: auto auto auto 3;
+        width: 64;
+        height: auto;
+        padding: 1 2;
+        border: thick $background 80%;
+        background: $surface;
+    }
+
+    #alias-title,
+    #alias-entity,
+    #alias-input,
+    #alias-error {
+        column-span: 2;
+    }
+
+    #alias-title {
+        text-style: bold;
+    }
+
+    #alias-error {
+        color: $error;
+        min-height: 1;
+    }
+
+    #alias-dialog Button {
+        width: 100%;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        entity_id: str,
+        current_alias: str | None,
+        aliases: dict[str, str],
+    ):
+        super().__init__()
+        self.entity_id = entity_id
+        self.current_alias = current_alias or ""
+        self.aliases = aliases
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label(
+                "Add hactl alias",
+                id="alias-title",
+            ),
+            Label(
+                f"Entity: {self.entity_id}",
+                id="alias-entity",
+            ),
+            Input(
+                value=self.current_alias,
+                placeholder="e.g. ute-temp",
+                id="alias-input",
+            ),
+            Static(
+                "",
+                id="alias-error",
+            ),
+            Button(
+                "Save",
+                variant="primary",
+                id="alias-save",
+            ),
+            Button(
+                "Cancel",
+                id="alias-cancel",
+            ),
+            id="alias-dialog",
+        )
+
+    def on_mount(self) -> None:
+        alias_input = self.query_one(
+            "#alias-input",
+            Input,
+        )
+        alias_input.focus()
+        alias_input.cursor_position = len(
+            alias_input.value
+        )
+
+    def validate_alias(self) -> str | None:
+        alias_input = self.query_one(
+            "#alias-input",
+            Input,
+        )
+        alias = alias_input.value.strip()
+        error = self.query_one(
+            "#alias-error",
+            Static,
+        )
+
+        if not alias:
+            error.update("Alias cannot be empty.")
+            return None
+
+        if "\n" in alias or "\r" in alias:
+            error.update(
+                "Alias cannot contain line breaks."
+            )
+            return None
+
+        existing_entity = self.aliases.get(alias)
+
+        if (
+            existing_entity is not None
+            and existing_entity != self.entity_id
+        ):
+            error.update(
+                f"Alias '{alias}' is already used by "
+                f"{existing_entity}."
+            )
+            return None
+
+        return alias
+
+    def submit_alias(self) -> None:
+        alias = self.validate_alias()
+
+        if alias is not None:
+            self.dismiss(alias)
+
+    def on_input_submitted(
+        self,
+        event: Input.Submitted,
+    ) -> None:
+        if event.input.id == "alias-input":
+            self.submit_alias()
+
+    def on_button_pressed(
+        self,
+        event: Button.Pressed,
+    ) -> None:
+        if event.button.id == "alias-save":
+            self.submit_alias()
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class HactlApp(App):
@@ -80,6 +243,7 @@ class HactlApp(App):
         Binding("/", "focus_search", "Search"),
         Binding("escape", "focus_list", "List"),
         Binding("r", "refresh", "Refresh"),
+        Binding("a", "alias_selected", "Alias"),
         Binding("space", "toggle_selected", "Toggle"),
         Binding("o", "turn_on_selected", "On"),
         Binding("f", "turn_off_selected", "Off"),
@@ -648,6 +812,63 @@ class HactlApp(App):
         self.refresh_states(entity_id)
         self.set_status(
             f"Brightness {target}% confirmed for {entity_id}"
+        )
+
+    def action_alias_selected(self) -> None:
+        state = self.selected_state()
+
+        if not state:
+            return
+
+        entity_id = state["entity_id"]
+        current_alias = self.alias_by_entity.get(
+            entity_id
+        )
+
+        def alias_saved(
+            alias: str | None,
+        ) -> None:
+            if alias is None:
+                self.query_one(
+                    "#entities",
+                    DataTable,
+                ).focus()
+                return
+
+            try:
+                aliases = set_alias(
+                    alias,
+                    entity_id,
+                )
+            except ConfigError as exc:
+                self.set_status(
+                    f"Could not save alias: {exc}"
+                )
+                return
+
+            self.config.aliases = aliases
+            self.alias_by_entity = {
+                target: alias_name
+                for alias_name, target in aliases.items()
+            }
+
+            self.selected_entity_id = entity_id
+            self.refresh_table()
+            self.query_one(
+                "#entities",
+                DataTable,
+            ).focus()
+            self.set_status(
+                f"Alias '{alias}' saved for {entity_id}"
+            )
+
+        self.push_screen(
+            AliasScreen(
+                entity_id,
+                current_alias,
+                self.config.aliases,
+            ),
+            alias_saved,
         )
 
     def action_focus_search(self) -> None:
