@@ -273,12 +273,14 @@ class HactlApp(App):
         margin: 1 1 0 1;
     }
 
-    #filters {
+    #filters,
+    #action-filters {
         height: auto;
         margin: 0 1;
     }
 
-    #filters Button {
+    #filters Button,
+    #action-filters Button {
         margin-right: 1;
     }
 
@@ -319,6 +321,7 @@ class HactlApp(App):
         Binding("a", "alias_selected", "Alias"),
         Binding("d", "remove_alias_selected", "Remove alias"),
         Binding("s", "cycle_sort", "Sort"),
+        Binding("x", "run_selected", "Run"),
         Binding("space", "toggle_selected", "Toggle"),
         Binding("o", "turn_on_selected", "On"),
         Binding("f", "turn_off_selected", "Off"),
@@ -365,6 +368,11 @@ class HactlApp(App):
             yield Button("Binary", id="filter-binary_sensor")
             yield Button("Switches", id="filter-switch")
 
+        with Horizontal(id="action-filters"):
+            yield Button("Scenes", id="filter-scene")
+            yield Button("Scripts", id="filter-script")
+            yield Button("Automations", id="filter-automation")
+
         yield DataTable(id="entities")
 
         yield Static(
@@ -373,6 +381,7 @@ class HactlApp(App):
         )
 
         with Horizontal(id="actions"):
+            yield Button("Run", id="action-run")
             yield Button("On", id="action-on")
             yield Button("Off", id="action-off")
             yield Button("Toggle", id="action-toggle")
@@ -654,6 +663,15 @@ class HactlApp(App):
                 f"Brightness: {brightness}%"
             )
 
+        last_triggered = attributes.get(
+            "last_triggered"
+        )
+
+        if last_triggered:
+            lines.append(
+                f"Last triggered: {last_triggered}"
+            )
+
         details.update("\n".join(lines))
 
     def on_input_changed(
@@ -714,10 +732,14 @@ class HactlApp(App):
                 self.domain_filter = filter_name
                 label = filter_name
 
-            for button in self.query(
-                "#filters Button"
+            for selector in (
+                "#filters Button",
+                "#action-filters Button",
             ):
-                button.variant = "default"
+                for button in self.query(
+                    selector
+                ):
+                    button.variant = "default"
 
             self.query_one(
                 f"#filter-{filter_name}",
@@ -728,6 +750,10 @@ class HactlApp(App):
             self.set_status(
                 f"Filter: {label}"
             )
+            return
+
+        if button_id == "action-run":
+            self.run_selected()
             return
 
         actions = {
@@ -781,9 +807,10 @@ class HactlApp(App):
         if domain not in {
             "light",
             "switch",
+            "automation",
         }:
             self.set_status(
-                f"{entity_id} is read-only in the TUI MVP"
+                f"{entity_id} does not support on/off/toggle in the TUI"
             )
             return
 
@@ -834,6 +861,46 @@ class HactlApp(App):
         self.refresh_states(entity_id)
         self.set_status(
             f"{service} confirmed for {entity_id}"
+        )
+
+    def run_selected(self) -> None:
+        state = self.selected_state()
+
+        if not state:
+            return
+
+        entity_id = state["entity_id"]
+        domain = entity_domain(entity_id)
+
+        service_by_domain = {
+            "scene": "turn_on",
+            "script": "turn_on",
+            "automation": "trigger",
+        }
+
+        service = service_by_domain.get(
+            domain
+        )
+
+        if service is None:
+            self.set_status(
+                "Run is only available for scenes, scripts, and automations"
+            )
+            return
+
+        try:
+            self.client.call_service(
+                domain,
+                service,
+                entity_id,
+            )
+        except HomeAssistantError as exc:
+            self.set_status(f"Error: {exc}")
+            return
+
+        self.refresh_states(entity_id)
+        self.set_status(
+            f"{service} requested for {entity_id}"
         )
 
     def change_brightness(
@@ -1073,6 +1140,9 @@ class HactlApp(App):
         self.refresh_states(
             self.selected_entity_id
         )
+
+    def action_run_selected(self) -> None:
+        self.run_selected()
 
     def action_toggle_selected(self) -> None:
         self.call_selected_service("toggle")

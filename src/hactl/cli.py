@@ -286,6 +286,81 @@ def call_entity_service(
         client.close()
 
 
+def action_service_for_domain(domain: str) -> str:
+    services = {
+        "scene": "turn_on",
+        "script": "turn_on",
+        "automation": "trigger",
+    }
+
+    try:
+        return services[domain]
+    except KeyError as exc:
+        raise ValueError(
+            f"{domain} entities cannot be run; expected scene, script, or automation"
+        ) from exc
+
+
+def list_action_domain(domain: str) -> None:
+    config, client = get_client()
+
+    try:
+        states = [
+            state
+            for state in client.get_states()
+            if state["entity_id"].startswith(
+                f"{domain}."
+            )
+        ]
+
+        table = Table()
+        table.add_column("Entity")
+        table.add_column("State")
+        table.add_column("Name")
+        table.add_column("Last triggered")
+
+        for state in sorted(
+            states,
+            key=lambda item: item["entity_id"],
+        ):
+            attributes = state.get(
+                "attributes",
+                {},
+            )
+
+            table.add_row(
+                state["entity_id"],
+                format_state_value(
+                    state,
+                    config.binary_sensor_states,
+                ),
+                str(
+                    attributes.get(
+                        "friendly_name",
+                        "",
+                    )
+                ),
+                str(
+                    attributes.get(
+                        "last_triggered",
+                        "",
+                    )
+                    or ""
+                ),
+            )
+
+        console.print(table)
+
+    except HomeAssistantError as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    finally:
+        client.close()
+
+
 @app.command()
 def status(name: AliasName):
     """Show the state of an entity."""
@@ -336,6 +411,15 @@ def status(name: AliasName):
                 console.print(
                     f"Brightness: {percent}%"
                 )
+
+        last_triggered = attributes.get(
+            "last_triggered"
+        )
+
+        if last_triggered:
+            console.print(
+                f"Last triggered: {last_triggered}"
+            )
 
     except HomeAssistantError as exc:
         console.print(
@@ -560,6 +644,216 @@ def find(search: str):
         console.print(table)
 
     except HomeAssistantError as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    finally:
+        client.close()
+
+
+@app.command()
+def run(name: AliasName):
+    """Run a scene, script, or automation."""
+
+    config, client = get_client()
+    entity_id = resolve_entity(
+        name,
+        config.aliases,
+    )
+
+    try:
+        domain = entity_domain(entity_id)
+        service = action_service_for_domain(
+            domain
+        )
+        before = client.get_state(entity_id)
+        friendly_name = before.get(
+            "attributes",
+            {},
+        ).get(
+            "friendly_name",
+            entity_id,
+        )
+
+        client.call_service(
+            domain,
+            service,
+            entity_id,
+        )
+
+        console.print(
+            f"[green]✓[/green] "
+            f"{friendly_name} ({entity_id}) → "
+            f"{service} requested"
+        )
+
+    except (
+        HomeAssistantError,
+        ValueError,
+    ) as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    finally:
+        client.close()
+
+
+@app.command()
+def scenes():
+    """List Home Assistant scenes."""
+
+    list_action_domain("scene")
+
+
+@app.command()
+def scripts():
+    """List Home Assistant scripts."""
+
+    list_action_domain("script")
+
+
+@app.command()
+def automations():
+    """List Home Assistant automations."""
+
+    list_action_domain("automation")
+
+
+@app.command()
+def automation(
+    action: str,
+    name: AliasName,
+):
+    """Inspect or control one automation."""
+
+    normalized_action = action.casefold()
+
+    if normalized_action not in {
+        "status",
+        "enable",
+        "disable",
+        "toggle",
+        "trigger",
+    }:
+        console.print(
+            "[red]Error:[/red] ACTION must be one of: "
+            "status, enable, disable, toggle, trigger"
+        )
+        raise typer.Exit(1)
+
+    config, client = get_client()
+    entity_id = resolve_entity(
+        name,
+        config.aliases,
+    )
+
+    try:
+        if entity_domain(entity_id) != "automation":
+            raise ValueError(
+                f"{entity_id} is not an automation entity"
+            )
+
+        state = client.get_state(entity_id)
+        attributes = state.get(
+            "attributes",
+            {},
+        )
+        friendly_name = attributes.get(
+            "friendly_name",
+            entity_id,
+        )
+
+        if normalized_action == "status":
+            console.print(
+                f"[bold]{friendly_name}[/bold]"
+            )
+            console.print(
+                f"Entity: {entity_id}"
+            )
+            console.print(
+                f"State:  {format_state_value(state, config.binary_sensor_states)}"
+            )
+
+            last_triggered = attributes.get(
+                "last_triggered"
+            )
+
+            if last_triggered:
+                console.print(
+                    f"Last triggered: {last_triggered}"
+                )
+
+            return
+
+        service_by_action = {
+            "enable": "turn_on",
+            "disable": "turn_off",
+            "toggle": "toggle",
+            "trigger": "trigger",
+        }
+        service = service_by_action[
+            normalized_action
+        ]
+
+        current_value = state.get("state")
+        expected_state = None
+
+        if normalized_action == "enable":
+            expected_state = "on"
+        elif normalized_action == "disable":
+            expected_state = "off"
+        elif (
+            normalized_action == "toggle"
+            and current_value in {"on", "off"}
+        ):
+            expected_state = (
+                "off"
+                if current_value == "on"
+                else "on"
+            )
+
+        client.call_service(
+            "automation",
+            service,
+            entity_id,
+        )
+
+        if expected_state is None:
+            console.print(
+                f"[green]✓[/green] "
+                f"{friendly_name} ({entity_id}) → "
+                f"{service} requested"
+            )
+            return
+
+        latest_state, confirmed = wait_for_state(
+            client,
+            entity_id,
+            expected_state,
+        )
+
+        if confirmed:
+            console.print(
+                f"[green]✓[/green] "
+                f"{friendly_name} ({entity_id}) → "
+                f"{latest_state.get('state')}"
+            )
+        else:
+            console.print(
+                f"[yellow]Warning:[/yellow] "
+                f"Home Assistant accepted the command, but "
+                f"{friendly_name} ({entity_id}) still reports "
+                f"{latest_state.get('state')}."
+            )
+
+    except (
+        HomeAssistantError,
+        ValueError,
+    ) as exc:
         console.print(
             f"[red]Error:[/red] {exc}"
         )

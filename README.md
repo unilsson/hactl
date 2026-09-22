@@ -13,9 +13,10 @@ The project is designed for fast day-to-day access to Home Assistant entities wi
 - complete alias lifecycle from both CLI and TUI
 - alias health checks against Home Assistant
 - alias-aware shell completion
+- scenes, scripts, and automations as first-class runnable entities
 - local configuration and credentials kept outside the Git repository
 
-The current implementation is at the Sprint 6 daily-use stage.
+The current implementation is at the Sprint 7 scenes/scripts/automations stage.
 
 ## Requirements
 
@@ -259,6 +260,11 @@ The complete CLI currently consists of:
 | Alias | `hactl alias ALIAS ENTITY_ID` | Create or change an alias |
 | Unalias | `hactl unalias ALIAS` | Remove an alias |
 | Aliases | `hactl aliases [--check]` | List aliases and optionally validate targets |
+| Run | `hactl run NAME` | Activate a scene, run a script, or trigger an automation |
+| Scenes | `hactl scenes` | List scenes |
+| Scripts | `hactl scripts` | List scripts |
+| Automations | `hactl automations` | List automations |
+| Automation | `hactl automation ACTION NAME` | Inspect, enable, disable, toggle, or trigger an automation |
 | TUI | `hactl tui` | Start the interactive terminal interface |
 
 Every command has generated Typer help:
@@ -451,6 +457,99 @@ hactl entities -d 'light.*'
 
 The output is sorted by entity ID.
 
+## Scenes, scripts, and automations
+
+Sprint 7 adds first-class support for Home Assistant action-oriented entities:
+
+```text
+scene.*
+script.*
+automation.*
+```
+
+Aliases work for these entities exactly as they do for lights and sensors.
+
+For example:
+
+```toml
+[aliases]
+filmkväll = "scene.filmkvall"
+godnatt = "script.godnatt"
+nattbelysning = "automation.nattbelysning"
+```
+
+### Run a scene, script, or automation
+
+Use the generic `run` command:
+
+```bash
+hactl run filmkväll
+hactl run godnatt
+hactl run nattbelysning
+```
+
+The mapping is:
+
+| Domain | Home Assistant service |
+|---|---|
+| `scene` | `scene.turn_on` |
+| `script` | `script.turn_on` |
+| `automation` | `automation.trigger` |
+
+Unlike light on/off commands, running a scene or triggering an automation does not necessarily produce a simple state transition that hactl can confirm. hactl therefore reports that the Home Assistant service request was accepted rather than pretending that a resulting state has been verified.
+
+### List action entities
+
+```bash
+hactl scenes
+hactl scripts
+hactl automations
+```
+
+These tables show entity ID, state, friendly name, and `last_triggered` when Home Assistant provides it.
+
+The existing generic commands also continue to work:
+
+```bash
+hactl entities -d scene
+hactl entities -d script
+hactl entities -d automation
+hactl find godnatt
+hactl status nattbelysning
+```
+
+### Control automations
+
+Syntax:
+
+```bash
+hactl automation ACTION NAME
+```
+
+Supported actions:
+
+```text
+status
+enable
+disable
+toggle
+trigger
+```
+
+Examples:
+
+```bash
+hactl automation status nattbelysning
+hactl automation disable nattbelysning
+hactl automation enable nattbelysning
+hactl automation toggle nattbelysning
+hactl automation trigger nattbelysning
+```
+
+Enable, disable, and toggle operations use Home Assistant's normal `on` / `off` automation state and are confirmed using the same polling logic as lights and switches.
+
+`trigger` calls `automation.trigger` without changing whether the automation itself is enabled.
+
 ## Sensors
 
 Sensors are read-only from the hactl MVP.
@@ -605,6 +704,9 @@ The TUI currently has these filters:
 - **Sensors** — `sensor.*`
 - **Binary** — `binary_sensor.*`
 - **Switches** — `switch.*`
+- **Scenes** — `scene.*`
+- **Scripts** — `script.*`
+- **Automations** — `automation.*`
 
 ### Search
 
@@ -639,18 +741,27 @@ Selecting an entity shows a detail panel containing available information such a
 - alias
 - device class
 - brightness for lights
+- last-triggered time when Home Assistant provides it
 
 ### Controls
 
-The TUI allows state-changing operations only for:
+The TUI supports normal on/off/toggle control for:
 
 - lights
 - switches
+- automations
 
-Sensors and binary sensors are intentionally read-only in the current MVP.
+It also provides a dedicated **Run** action for:
+
+- scenes
+- scripts
+- automations
+
+Sensors and binary sensors remain read-only.
 
 Available control buttons are:
 
+- Run
 - On
 - Off
 - Toggle
@@ -670,9 +781,10 @@ Lights that explicitly report only `onoff` capability are treated as non-dimmabl
 | `a` | Add or change alias for selected entity |
 | `d` | Remove the selected entity's alias after confirmation |
 | `s` | Cycle sort order: alias, name, state, entity |
-| `Space` | Toggle selected light or switch |
-| `o` | Turn selected light or switch on |
-| `f` | Turn selected light or switch off |
+| `x` | Run selected scene/script or trigger selected automation |
+| `Space` | Toggle selected light, switch, or automation |
+| `o` | Turn selected light/switch on or enable selected automation |
+| `f` | Turn selected light/switch off or disable selected automation |
 | `+` | Increase brightness by 10% |
 | `-` | Decrease brightness by 10% |
 | `r` | Refresh states |
@@ -919,7 +1031,7 @@ so changes in the source tree are immediately available to the installed command
 
 ## Current scope
 
-The Sprint 6 implementation currently focuses on:
+The Sprint 7 implementation currently focuses on:
 
 - Home Assistant entity discovery
 - full alias lifecycle from CLI and TUI
@@ -927,6 +1039,9 @@ The Sprint 6 implementation currently focuses on:
 - shell completion for configured aliases
 - explicit unavailable/unknown state display
 - TUI sorting
+- scenes
+- scripts
+- automation inspection, enable/disable/toggle, and trigger
 - lights
 - switches
 - sensors
@@ -960,5 +1075,10 @@ hactl entities -d sensor -c temperature
 hactl find temperature
 hactl aliases
 hactl aliases --check
+hactl scenes
+hactl scripts
+hactl automations
+hactl run godnatt
+hactl automation status nattbelysning
 hactl tui
 ```
