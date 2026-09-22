@@ -536,6 +536,23 @@ def find(search: str):
 
 
 @app.command()
+def tui():
+    """Open the interactive terminal interface."""
+
+    try:
+        config = load_config()
+    except ConfigError as exc:
+        console.print(
+            f"[red]Configuration error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    from hactl.tui import run_tui
+
+    run_tui(config)
+
+
+@app.command()
 def aliases():
     """List configured aliases."""
 
