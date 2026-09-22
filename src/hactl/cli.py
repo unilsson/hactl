@@ -607,9 +607,10 @@ def alias_command(
         )
         raise typer.Exit(1)
 
+    normalized_alias = alias.strip()
     console.print(
-        f"[green]✓[/green] Alias '{alias}' → "
-        f"{aliases[alias]}"
+        f"[green]✓[/green] Alias '{normalized_alias}' → "
+        f"{aliases[normalized_alias]}"
     )
 
 
