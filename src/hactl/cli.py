@@ -210,6 +210,25 @@ def brightness(name: str, percent: int):
                 f"{entity_id} is not a light entity"
             )
 
+        current_state = client.get_state(entity_id)
+        current_attributes = current_state.get(
+            "attributes",
+            {},
+        )
+
+        supported_color_modes = set(
+            current_attributes.get(
+                "supported_color_modes",
+                [],
+            )
+            or []
+        )
+
+        if supported_color_modes == {"onoff"}:
+            raise ValueError(
+                f"{entity_id} does not support brightness control"
+            )
+
         client.call_service(
             "light",
             "turn_on",
@@ -236,7 +255,12 @@ def brightness(name: str, percent: int):
             actual_percent = round(
                 actual / 255 * 100
             )
+        elif percent == 0 and state["state"] == "off":
+            actual_percent = 0
+        else:
+            actual_percent = None
 
+        if actual_percent is not None:
             console.print(
                 f"[green]✓[/green] "
                 f"{friendly_name} "
