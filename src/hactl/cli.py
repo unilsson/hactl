@@ -249,13 +249,35 @@ def find(search: str):
 
 
 @app.command()
-def entities():
-    """List all Home Assistant entities."""
+def entities(
+    domain: str | None = typer.Option(
+        None,
+        "--domain",
+        "-d",
+        help="Only list entities from this Home Assistant domain, e.g. light.",
+    ),
+):
+    """List Home Assistant entities, optionally filtered by domain."""
 
     _, client = get_client()
 
     try:
         states = client.get_states()
+
+        if domain:
+            normalized_domain = (
+                domain.lower()
+                .removesuffix(".*")
+                .removesuffix(".")
+            )
+
+            states = [
+                state
+                for state in states
+                if state["entity_id"].lower().startswith(
+                    f"{normalized_domain}."
+                )
+            ]
 
         table = Table()
 
