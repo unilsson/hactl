@@ -188,6 +188,84 @@ def toggle(name: str):
 
 
 @app.command()
+def brightness(name: str, percent: int):
+    """Set light brightness from 0 to 100 percent."""
+
+    if percent < 0 or percent > 100:
+        console.print(
+            "[red]Error:[/red] Brightness must be between 0 and 100."
+        )
+        raise typer.Exit(1)
+
+    config, client = get_client()
+
+    entity_id = resolve_entity(
+        name,
+        config.aliases,
+    )
+
+    try:
+        if entity_domain(entity_id) != "light":
+            raise ValueError(
+                f"{entity_id} is not a light entity"
+            )
+
+        client.call_service(
+            "light",
+            "turn_on",
+            entity_id,
+            {
+                "brightness_pct": percent,
+            },
+        )
+
+        state = client.get_state(entity_id)
+        attributes = state.get(
+            "attributes",
+            {},
+        )
+
+        friendly_name = attributes.get(
+            "friendly_name",
+            entity_id,
+        )
+
+        actual = attributes.get("brightness")
+
+        if actual is not None:
+            actual_percent = round(
+                actual / 255 * 100
+            )
+
+            console.print(
+                f"[green]✓[/green] "
+                f"{friendly_name} "
+                f"({entity_id}) → "
+                f"{state['state']}, "
+                f"brightness {actual_percent}%"
+            )
+        else:
+            console.print(
+                f"[green]✓[/green] "
+                f"{friendly_name} "
+                f"({entity_id}) → "
+                f"{state['state']}"
+            )
+
+    except (
+        HomeAssistantError,
+        ValueError,
+    ) as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    finally:
+        client.close()
+
+
+@app.command()
 def find(search: str):
     """Search Home Assistant entities."""
 
