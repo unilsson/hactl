@@ -1,3 +1,5 @@
+import time
+
 import typer
 
 from rich.console import Console
@@ -48,6 +50,55 @@ def entity_domain(entity_id: str) -> str:
         )
 
     return entity_id.split(".", 1)[0]
+
+
+def get_brightness_percent(state: dict) -> int | None:
+    attributes = state.get(
+        "attributes",
+        {},
+    )
+
+    brightness = attributes.get("brightness")
+
+    if brightness is not None:
+        return round(
+            brightness / 255 * 100
+        )
+
+    if state.get("state") == "off":
+        return 0
+
+    return None
+
+
+def wait_for_brightness(
+    client: HomeAssistantClient,
+    entity_id: str,
+    target_percent: int,
+    timeout: float = 2.0,
+    interval: float = 0.1,
+) -> tuple[dict, bool]:
+    deadline = time.monotonic() + timeout
+    state = client.get_state(entity_id)
+
+    while True:
+        actual_percent = get_brightness_percent(state)
+
+        if target_percent == 0:
+            if state.get("state") == "off":
+                return state, True
+        elif (
+            state.get("state") == "on"
+            and actual_percent is not None
+            and abs(actual_percent - target_percent) <= 1
+        ):
+            return state, True
+
+        if time.monotonic() >= deadline:
+            return state, False
+
+        time.sleep(interval)
+        state = client.get_state(entity_id)
 
 
 def call_entity_service(
@@ -229,16 +280,28 @@ def brightness(name: str, percent: int):
                 f"{entity_id} does not support brightness control"
             )
 
-        client.call_service(
-            "light",
-            "turn_on",
+        if percent == 0:
+            client.call_service(
+                "light",
+                "turn_off",
+                entity_id,
+            )
+        else:
+            client.call_service(
+                "light",
+                "turn_on",
+                entity_id,
+                {
+                    "brightness_pct": percent,
+                },
+            )
+
+        state, confirmed = wait_for_brightness(
+            client,
             entity_id,
-            {
-                "brightness_pct": percent,
-            },
+            percent,
         )
 
-        state = client.get_state(entity_id)
         attributes = state.get(
             "attributes",
             {},
@@ -249,18 +312,9 @@ def brightness(name: str, percent: int):
             entity_id,
         )
 
-        actual = attributes.get("brightness")
+        actual_percent = get_brightness_percent(state)
 
-        if actual is not None:
-            actual_percent = round(
-                actual / 255 * 100
-            )
-        elif percent == 0 and state["state"] == "off":
-            actual_percent = 0
-        else:
-            actual_percent = None
-
-        if actual_percent is not None:
+        if confirmed:
             console.print(
                 f"[green]✓[/green] "
                 f"{friendly_name} "
@@ -269,11 +323,17 @@ def brightness(name: str, percent: int):
                 f"brightness {actual_percent}%"
             )
         else:
+            reported = (
+                f", brightness {actual_percent}%"
+                if actual_percent is not None
+                else ""
+            )
+
             console.print(
-                f"[green]✓[/green] "
-                f"{friendly_name} "
-                f"({entity_id}) → "
-                f"{state['state']}"
+                f"[yellow]Warning:[/yellow] "
+                f"Home Assistant accepted the command, but "
+                f"{friendly_name} ({entity_id}) still reports "
+                f"{state['state']}{reported}."
             )
 
     except (
