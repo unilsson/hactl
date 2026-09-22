@@ -1,4 +1,5 @@
 import time
+from typing import Annotated
 
 import typer
 
@@ -12,6 +13,8 @@ from hactl.client import (
 from hactl.config import (
     ConfigError,
     load_config,
+    remove_alias,
+    set_alias,
 )
 
 
@@ -20,6 +23,34 @@ app = typer.Typer(
 )
 
 console = Console()
+
+
+def complete_alias(incomplete: str) -> list[str]:
+    """Return configured aliases for shell completion."""
+
+    try:
+        config = load_config()
+    except ConfigError:
+        return []
+
+    return [
+        alias
+        for alias in sorted(
+            config.aliases,
+            key=str.casefold,
+        )
+        if alias.casefold().startswith(
+            incomplete.casefold()
+        )
+    ]
+
+
+AliasName = Annotated[
+    str,
+    typer.Argument(
+        autocompletion=complete_alias,
+    ),
+]
 
 
 def get_client():
@@ -82,6 +113,12 @@ def format_state_value(
 
         if mapping:
             value = mapping.get(value, value)
+
+    if value == "unavailable":
+        return "⚠ unavailable"
+
+    if value == "unknown":
+        return "? unknown"
 
     unit = attributes.get("unit_of_measurement")
 
@@ -250,7 +287,7 @@ def call_entity_service(
 
 
 @app.command()
-def status(name: str):
+def status(name: AliasName):
     """Show the state of an entity."""
 
     config, client = get_client()
@@ -314,7 +351,7 @@ def status(name: str):
 
 
 @app.command()
-def on(name: str):
+def on(name: AliasName):
     """Turn an entity on."""
 
     call_entity_service(
@@ -324,7 +361,7 @@ def on(name: str):
 
 
 @app.command()
-def off(name: str):
+def off(name: AliasName):
     """Turn an entity off."""
 
     call_entity_service(
@@ -334,7 +371,7 @@ def off(name: str):
 
 
 @app.command()
-def toggle(name: str):
+def toggle(name: AliasName):
     """Toggle an entity."""
 
     call_entity_service(
@@ -344,7 +381,7 @@ def toggle(name: str):
 
 
 @app.command()
-def brightness(name: str, percent: int):
+def brightness(name: AliasName, percent: int):
     """Set light brightness from 0 to 100 percent."""
 
     if percent < 0 or percent > 100:
@@ -552,8 +589,58 @@ def tui():
     run_tui(config)
 
 
+@app.command("alias")
+def alias_command(
+    alias: str,
+    entity_id: str,
+):
+    """Create or change an alias."""
+
+    try:
+        aliases = set_alias(
+            alias,
+            entity_id,
+        )
+    except ConfigError as exc:
+        console.print(
+            f"[red]Configuration error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    console.print(
+        f"[green]✓[/green] Alias '{alias}' → "
+        f"{aliases[alias]}"
+    )
+
+
 @app.command()
-def aliases():
+def unalias(alias: AliasName):
+    """Remove a configured alias."""
+
+    try:
+        remove_alias(alias)
+    except ConfigError as exc:
+        console.print(
+            f"[red]Configuration error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    console.print(
+        f"[green]✓[/green] Removed alias '{alias}'"
+    )
+
+
+@app.command()
+def aliases(
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help=(
+            "Check whether configured alias targets still exist "
+            "in Home Assistant."
+        ),
+    ),
+):
     """List configured aliases."""
 
     try:
@@ -564,19 +651,63 @@ def aliases():
         )
         raise typer.Exit(1)
 
+    state_by_entity: dict[str, dict] = {}
+    client = None
+
+    if check:
+        client = HomeAssistantClient(
+            config.url,
+            config.token,
+        )
+
+        try:
+            states = client.get_states()
+            state_by_entity = {
+                state["entity_id"]: state
+                for state in states
+            }
+        except HomeAssistantError as exc:
+            console.print(
+                f"[red]Error:[/red] {exc}"
+            )
+            raise typer.Exit(1)
+        finally:
+            client.close()
+
     table = Table()
 
     table.add_column("Alias")
     table.add_column("Entity")
 
+    if check:
+        table.add_column("Status")
+
     for alias, entity_id in sorted(
         config.aliases.items(),
         key=lambda item: item[0].casefold(),
     ):
-        table.add_row(
+        row = [
             alias,
             entity_id,
-        )
+        ]
+
+        if check:
+            state = state_by_entity.get(
+                entity_id
+            )
+
+            if state is None:
+                status_value = "[red]missing[/red]"
+            elif state.get("state") == "unavailable":
+                status_value = "[yellow]unavailable[/yellow]"
+            elif state.get("state") == "unknown":
+                status_value = "[yellow]unknown[/yellow]"
+            else:
+                status_value = "[green]ok[/green]"
+
+            row.append(status_value)
+
+        table.add_row(*row)
 
     console.print(table)
 
