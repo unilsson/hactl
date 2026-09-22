@@ -255,7 +255,7 @@ class HactlApp(App):
         )
         self.set_status(
             f"Loaded {len(self.states)} entities; "
-            f"showing {visible_count} aliased entities"
+            f"showing {visible_count}"
         )
 
     def refresh_table(self) -> None:
@@ -435,6 +435,16 @@ class HactlApp(App):
                 self.aliases_only = False
                 self.domain_filter = filter_name
                 label = filter_name
+
+            for button in self.query(
+                "#filters Button"
+            ):
+                button.variant = "default"
+
+            self.query_one(
+                f"#filter-{filter_name}",
+                Button,
+            ).variant = "primary"
 
             self.refresh_table()
             self.set_status(
