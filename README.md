@@ -173,6 +173,8 @@ The MVP includes:
 - on/off/toggle for lights and switches
 - brightness changes in 10 percent steps for dimmable lights
 - binary sensor state mappings from `config.toml`
+- add or rename aliases directly from the TUI with `a`
+- atomic updates of `config.toml` while preserving TOML comments and formatting
 - refresh with `r`
 
 Keyboard controls:
@@ -180,6 +182,7 @@ Keyboard controls:
 ```text
 /       focus search
 Esc     focus entity list
+a       add/change alias for selected entity
 Space   toggle selected light/switch
 o       turn selected light/switch on
 f       turn selected light/switch off
@@ -190,6 +193,8 @@ q       quit
 ```
 
 The TUI deliberately keeps sensor entities read-only and reuses the same Home Assistant client, aliases, binary sensor mappings, and state confirmation logic as the CLI.
+
+To add an alias without editing the config file manually, select an entity (typically from `All`) and press `a`. Enter the alias and save. The alias is written to `~/.config/hactl/config.toml` and appears immediately in the `Aliased` view. If an entity already has an alias, the dialog is pre-filled so it can be renamed. An alias already assigned to another entity is rejected.
 
 ## Brightness
 
