@@ -412,6 +412,15 @@ def status(name: AliasName):
                     f"Brightness: {percent}%"
                 )
 
+        last_triggered = attributes.get(
+            "last_triggered"
+        )
+
+        if last_triggered:
+            console.print(
+                f"Last triggered: {last_triggered}"
+            )
+
     except HomeAssistantError as exc:
         console.print(
             f"[red]Error:[/red] {exc}"
