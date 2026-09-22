@@ -52,6 +52,27 @@ def entity_domain(entity_id: str) -> str:
     return entity_id.split(".", 1)[0]
 
 
+def wait_for_state(
+    client: HomeAssistantClient,
+    entity_id: str,
+    expected_state: str,
+    timeout: float = 2.0,
+    interval: float = 0.1,
+) -> tuple[dict, bool]:
+    deadline = time.monotonic() + timeout
+    state = client.get_state(entity_id)
+
+    while True:
+        if state.get("state") == expected_state:
+            return state, True
+
+        if time.monotonic() >= deadline:
+            return state, False
+
+        time.sleep(interval)
+        state = client.get_state(entity_id)
+
+
 def get_brightness_percent(state: dict) -> int | None:
     attributes = state.get(
         "attributes",
@@ -114,6 +135,21 @@ def call_entity_service(
 
     try:
         domain = entity_domain(entity_id)
+        current_state = client.get_state(entity_id)
+        current_value = current_state.get("state")
+
+        expected_state = None
+
+        if service == "turn_on":
+            expected_state = "on"
+        elif service == "turn_off":
+            expected_state = "off"
+        elif service == "toggle" and current_value in {"on", "off"}:
+            expected_state = (
+                "off"
+                if current_value == "on"
+                else "on"
+            )
 
         client.call_service(
             domain,
@@ -121,7 +157,15 @@ def call_entity_service(
             entity_id,
         )
 
-        state = client.get_state(entity_id)
+        if expected_state is not None:
+            state, confirmed = wait_for_state(
+                client,
+                entity_id,
+                expected_state,
+            )
+        else:
+            state = client.get_state(entity_id)
+            confirmed = True
 
         friendly_name = state.get(
             "attributes",
@@ -131,12 +175,20 @@ def call_entity_service(
             entity_id,
         )
 
-        console.print(
-            f"[green]✓[/green] "
-            f"{friendly_name} "
-            f"({entity_id}) → "
-            f"{state['state']}"
-        )
+        if confirmed:
+            console.print(
+                f"[green]✓[/green] "
+                f"{friendly_name} "
+                f"({entity_id}) → "
+                f"{state['state']}"
+            )
+        else:
+            console.print(
+                f"[yellow]Warning:[/yellow] "
+                f"Home Assistant accepted the command, but "
+                f"{friendly_name} ({entity_id}) still reports "
+                f"{state['state']}."
+            )
 
     except (
         HomeAssistantError,
