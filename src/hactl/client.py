@@ -65,11 +65,17 @@ class HomeAssistantClient:
         domain: str,
         service: str,
         entity_id: str,
+        data: dict | None = None,
     ):
+        payload = {
+            "entity_id": entity_id,
+        }
+
+        if data:
+            payload.update(data)
+
         return self._request(
             "POST",
             f"/api/services/{domain}/{service}",
-            json={
-                "entity_id": entity_id,
-            },
+            json=payload,
         )
