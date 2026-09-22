@@ -18,6 +18,7 @@ from hactl.client import HomeAssistantClient, HomeAssistantError
 from hactl.config import (
     Config,
     ConfigError,
+    remove_alias,
     set_alias,
 )
 from hactl.cli import (
@@ -186,6 +187,78 @@ class AliasScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class ConfirmRemoveAliasScreen(ModalScreen[bool]):
+    """Confirm removal of an alias."""
+
+    CSS = """
+    ConfirmRemoveAliasScreen {
+        align: center middle;
+    }
+
+    #confirm-dialog {
+        grid-size: 2;
+        grid-gutter: 1 2;
+        grid-rows: auto 3;
+        width: 64;
+        height: auto;
+        padding: 1 2;
+        border: thick $background 80%;
+        background: $surface;
+    }
+
+    #confirm-message {
+        column-span: 2;
+    }
+
+    #confirm-dialog Button {
+        width: 100%;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        alias: str,
+        entity_id: str,
+    ):
+        super().__init__()
+        self.alias = alias
+        self.entity_id = entity_id
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label(
+                f"Remove alias '{self.alias}' from "
+                f"{self.entity_id}?",
+                id="confirm-message",
+            ),
+            Button(
+                "Remove",
+                variant="error",
+                id="confirm-remove",
+            ),
+            Button(
+                "Cancel",
+                id="confirm-cancel",
+            ),
+            id="confirm-dialog",
+        )
+
+    def on_button_pressed(
+        self,
+        event: Button.Pressed,
+    ) -> None:
+        self.dismiss(
+            event.button.id == "confirm-remove"
+        )
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 class HactlApp(App):
     """Interactive terminal interface for Home Assistant."""
 
@@ -244,6 +317,8 @@ class HactlApp(App):
         Binding("escape", "focus_list", "List"),
         Binding("r", "refresh", "Refresh"),
         Binding("a", "alias_selected", "Alias"),
+        Binding("d", "remove_alias_selected", "Remove alias"),
+        Binding("s", "cycle_sort", "Sort"),
         Binding("space", "toggle_selected", "Toggle"),
         Binding("o", "turn_on_selected", "On"),
         Binding("f", "turn_off_selected", "Off"),
@@ -262,6 +337,7 @@ class HactlApp(App):
         self.search_query = ""
         self.domain_filter: str | None = None
         self.aliases_only = True
+        self.sort_mode = "alias"
         self.selected_entity_id: str | None = None
 
         self.alias_by_entity = {
@@ -383,15 +459,53 @@ class HactlApp(App):
 
             visible.append(state)
 
+        def sort_key(item: dict):
+            entity_id = item["entity_id"]
+            attributes = item.get(
+                "attributes",
+                {},
+            )
+            alias = self.alias_by_entity.get(
+                entity_id,
+                "",
+            )
+            friendly_name = str(
+                attributes.get(
+                    "friendly_name",
+                    "",
+                )
+            )
+            state_value = format_state_value(
+                item,
+                self.config.binary_sensor_states,
+            )
+
+            if self.sort_mode == "name":
+                return (
+                    friendly_name.casefold(),
+                    entity_id,
+                )
+
+            if self.sort_mode == "state":
+                return (
+                    state_value.casefold(),
+                    entity_id,
+                )
+
+            if self.sort_mode == "entity":
+                return (
+                    entity_id.casefold(),
+                    entity_id,
+                )
+
+            return (
+                alias.casefold(),
+                entity_id,
+            )
+
         return sorted(
             visible,
-            key=lambda item: (
-                self.alias_by_entity.get(
-                    item["entity_id"],
-                    "",
-                ).casefold(),
-                item["entity_id"],
-            ),
+            key=sort_key,
         )
 
     def refresh_states(
@@ -869,6 +983,84 @@ class HactlApp(App):
                 self.config.aliases,
             ),
             alias_saved,
+        )
+
+    def action_remove_alias_selected(self) -> None:
+        state = self.selected_state()
+
+        if not state:
+            return
+
+        entity_id = state["entity_id"]
+        alias = self.alias_by_entity.get(
+            entity_id
+        )
+
+        if not alias:
+            self.set_status(
+                f"{entity_id} has no hactl alias"
+            )
+            return
+
+        def alias_removed(
+            confirmed: bool,
+        ) -> None:
+            if not confirmed:
+                self.query_one(
+                    "#entities",
+                    DataTable,
+                ).focus()
+                return
+
+            try:
+                aliases = remove_alias(alias)
+            except ConfigError as exc:
+                self.set_status(
+                    f"Could not remove alias: {exc}"
+                )
+                return
+
+            self.config.aliases = aliases
+            self.alias_by_entity = {
+                target: alias_name
+                for alias_name, target in aliases.items()
+            }
+
+            self.selected_entity_id = entity_id
+            self.refresh_table()
+            self.query_one(
+                "#entities",
+                DataTable,
+            ).focus()
+            self.set_status(
+                f"Alias '{alias}' removed"
+            )
+
+        self.push_screen(
+            ConfirmRemoveAliasScreen(
+                alias,
+                entity_id,
+            ),
+            alias_removed,
+        )
+
+    def action_cycle_sort(self) -> None:
+        sort_modes = [
+            "alias",
+            "name",
+            "state",
+            "entity",
+        ]
+        current_index = sort_modes.index(
+            self.sort_mode
+        )
+        self.sort_mode = sort_modes[
+            (current_index + 1) % len(sort_modes)
+        ]
+
+        self.refresh_table()
+        self.set_status(
+            f"Sort: {self.sort_mode}"
         )
 
     def action_focus_search(self) -> None:

@@ -29,32 +29,14 @@ def get_config_dir() -> Path:
     return Path.home() / ".config" / "hactl"
 
 
-def set_alias(
-    alias: str,
-    entity_id: str,
-) -> dict[str, str]:
-    alias = alias.strip()
-
-    if not alias:
-        raise ConfigError("Alias cannot be empty")
-
-    if "\n" in alias or "\r" in alias:
-        raise ConfigError("Alias cannot contain line breaks")
-
-    if not entity_id or "." not in entity_id:
-        raise ConfigError(
-            f"Invalid entity ID: {entity_id}"
-        )
-
-    config_file = get_config_dir() / "config.toml"
-
+def _load_config_document(config_file: Path):
     if not config_file.exists():
         raise ConfigError(
             f"Configuration file not found: {config_file}"
         )
 
     try:
-        document = tomlkit.parse(
+        return tomlkit.parse(
             config_file.read_text(
                 encoding="utf-8"
             )
@@ -64,39 +46,11 @@ def set_alias(
             f"Could not parse {config_file}: {exc}"
         ) from exc
 
-    aliases = document.get("aliases")
 
-    if aliases is None:
-        aliases = tomlkit.table()
-        document["aliases"] = aliases
-
-    if not hasattr(aliases, "items"):
-        raise ConfigError(
-            "'aliases' must be a TOML table"
-        )
-
-    existing_target = aliases.get(alias)
-
-    if (
-        existing_target is not None
-        and str(existing_target) != entity_id
-    ):
-        raise ConfigError(
-            f"Alias '{alias}' is already assigned to "
-            f"{existing_target}"
-        )
-
-    for existing_alias, target in list(
-        aliases.items()
-    ):
-        if (
-            str(target) == entity_id
-            and str(existing_alias) != alias
-        ):
-            del aliases[existing_alias]
-
-    aliases[alias] = entity_id
-
+def _write_config_document(
+    config_file: Path,
+    document,
+) -> None:
     temp_path = None
 
     try:
@@ -137,6 +91,99 @@ def set_alias(
             and temp_path.exists()
         ):
             temp_path.unlink()
+
+
+def _aliases_from_document(document) -> dict[str, str]:
+    aliases = document.get("aliases")
+
+    if aliases is None:
+        aliases = tomlkit.table()
+        document["aliases"] = aliases
+
+    if not hasattr(aliases, "items"):
+        raise ConfigError(
+            "'aliases' must be a TOML table"
+        )
+
+    return aliases
+
+
+def set_alias(
+    alias: str,
+    entity_id: str,
+) -> dict[str, str]:
+    alias = alias.strip()
+    entity_id = entity_id.strip()
+
+    if not alias:
+        raise ConfigError("Alias cannot be empty")
+
+    if "\n" in alias or "\r" in alias:
+        raise ConfigError("Alias cannot contain line breaks")
+
+    if not entity_id or "." not in entity_id:
+        raise ConfigError(
+            f"Invalid entity ID: {entity_id}"
+        )
+
+    config_file = get_config_dir() / "config.toml"
+    document = _load_config_document(config_file)
+    aliases = _aliases_from_document(document)
+
+    existing_target = aliases.get(alias)
+
+    if (
+        existing_target is not None
+        and str(existing_target) != entity_id
+    ):
+        raise ConfigError(
+            f"Alias '{alias}' is already assigned to "
+            f"{existing_target}"
+        )
+
+    for existing_alias, target in list(
+        aliases.items()
+    ):
+        if (
+            str(target) == entity_id
+            and str(existing_alias) != alias
+        ):
+            del aliases[existing_alias]
+
+    aliases[alias] = entity_id
+
+    _write_config_document(
+        config_file,
+        document,
+    )
+
+    return {
+        str(key): str(value)
+        for key, value in aliases.items()
+    }
+
+
+def remove_alias(alias: str) -> dict[str, str]:
+    alias = alias.strip()
+
+    if not alias:
+        raise ConfigError("Alias cannot be empty")
+
+    config_file = get_config_dir() / "config.toml"
+    document = _load_config_document(config_file)
+    aliases = _aliases_from_document(document)
+
+    if alias not in aliases:
+        raise ConfigError(
+            f"Alias '{alias}' does not exist"
+        )
+
+    del aliases[alias]
+
+    _write_config_document(
+        config_file,
+        document,
+    )
 
     return {
         str(key): str(value)
@@ -187,6 +234,22 @@ def load_config() -> Config:
         raise ConfigError("Credentials file is empty")
 
     aliases = data.get("aliases", {})
+
+    if not isinstance(aliases, dict):
+        raise ConfigError(
+            "'aliases' must be a TOML table"
+        )
+
+    normalized_aliases: dict[str, str] = {}
+
+    for alias, entity_id in aliases.items():
+        if not isinstance(entity_id, str):
+            raise ConfigError(
+                f"Alias '{alias}' must point to an entity ID string"
+            )
+
+        normalized_aliases[str(alias)] = entity_id
+
     binary_sensor_states = data.get(
         "binary_sensor_states",
         {},
@@ -219,6 +282,6 @@ def load_config() -> Config:
     return Config(
         url=url.rstrip("/"),
         token=token,
-        aliases=aliases,
+        aliases=normalized_aliases,
         binary_sensor_states=binary_sensor_states,
     )
