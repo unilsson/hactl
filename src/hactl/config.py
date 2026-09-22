@@ -14,6 +14,7 @@ class Config:
     url: str
     token: str
     aliases: dict[str, str]
+    binary_sensor_states: dict[str, dict[str, str]]
 
 
 def get_config_dir() -> Path:
@@ -68,9 +69,38 @@ def load_config() -> Config:
         raise ConfigError("Credentials file is empty")
 
     aliases = data.get("aliases", {})
+    binary_sensor_states = data.get(
+        "binary_sensor_states",
+        {},
+    )
+
+    if not isinstance(binary_sensor_states, dict):
+        raise ConfigError(
+            "'binary_sensor_states' must be a TOML table"
+        )
+
+    for device_class, mapping in binary_sensor_states.items():
+        if not isinstance(mapping, dict):
+            raise ConfigError(
+                f"binary_sensor_states.{device_class} must be a TOML table"
+            )
+
+        for state_name, label in mapping.items():
+            if state_name not in {"on", "off"}:
+                raise ConfigError(
+                    f"Unsupported binary sensor state mapping: "
+                    f"{device_class}.{state_name}"
+                )
+
+            if not isinstance(label, str):
+                raise ConfigError(
+                    f"binary_sensor_states.{device_class}.{state_name} "
+                    f"must be a string"
+                )
 
     return Config(
         url=url.rstrip("/"),
         token=token,
         aliases=aliases,
+        binary_sensor_states=binary_sensor_states,
     )
