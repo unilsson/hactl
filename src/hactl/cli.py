@@ -329,16 +329,13 @@ def status(name: AliasName):
                 f"Device class: {device_class}"
             )
 
-        if "brightness" in attributes:
-            brightness = attributes["brightness"]
+        if entity_id.startswith("light."):
+            percent = get_brightness_percent(state)
 
-            percent = round(
-                brightness / 255 * 100
-            )
-
-            console.print(
-                f"Brightness: {percent}%"
-            )
+            if percent is not None:
+                console.print(
+                    f"Brightness: {percent}%"
+                )
 
     except HomeAssistantError as exc:
         console.print(
