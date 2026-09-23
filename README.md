@@ -450,8 +450,6 @@ hactl entities --domain sensor
 hactl entities -d binary_sensor
 hactl entities -d sensor --class temperature
 hactl entities -d sensor -c temperature
-hactl areas
-hactl devices --area Vardagsrum
 hactl entities --aliased -c door
 hactl entities -d binary_sensor -c door
 hactl entities --aliased
@@ -636,6 +634,8 @@ Useful commands include:
 ```bash
 hactl entities -d sensor
 hactl entities -d sensor -c temperature
+hactl areas
+hactl devices --area Vardagsrum
 hactl find temperature
 hactl status vardagsrum-temp
 ```
@@ -1104,7 +1104,7 @@ so changes in the source tree are immediately available to the installed command
 
 ## Current scope
 
-The Sprint 7 implementation currently focuses on:
+The current implementation focuses on:
 
 - Home Assistant entity discovery
 - Home Assistant area listing and device-to-area inspection
