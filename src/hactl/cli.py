@@ -355,6 +355,9 @@ def list_action_domain(domain: str) -> None:
         table.add_column("Entity")
         table.add_column("State")
         table.add_column("Name")
+
+        if area:
+            table.add_column("Area source")
         table.add_column("Last triggered")
 
         for state in sorted(
@@ -1366,6 +1369,15 @@ def entities(
         "--aliased",
         help="Only list entities configured under [aliases].",
     ),
+    area: str | None = typer.Option(
+        None,
+        "--area",
+        "-a",
+        help=(
+            "Only list entities whose effective Home Assistant "
+            "area matches this name or area ID."
+        ),
+    ),
 ):
     """List Home Assistant entities with optional filters."""
 
@@ -1373,6 +1385,83 @@ def entities(
 
     try:
         states = client.get_states()
+        area_source_by_entity: dict[str, str] = {}
+
+        if area:
+            area_entries, device_entries, entity_entries = (
+                client.get_registry_data()
+            )
+
+            selected_area = resolve_area(
+                area,
+                area_entries,
+            )
+            selected_area_id = str(
+                selected_area.get("area_id")
+            )
+
+            device_by_id = {
+                device.get("id"): device
+                for device in device_entries
+            }
+            entity_by_id = {
+                entry.get("entity_id"): entry
+                for entry in entity_entries
+            }
+
+            matching_states = []
+
+            for state in states:
+                entity_id = state["entity_id"]
+                entry = entity_by_id.get(
+                    entity_id
+                )
+
+                if entry is None:
+                    continue
+
+                explicit_area_id = entry.get(
+                    "area_id"
+                )
+
+                if explicit_area_id:
+                    effective_area_id = str(
+                        explicit_area_id
+                    )
+                    source = "entity"
+                else:
+                    device_id = entry.get(
+                        "device_id"
+                    )
+                    device = device_by_id.get(
+                        device_id
+                    )
+                    device_area_id = (
+                        device.get("area_id")
+                        if device
+                        else None
+                    )
+
+                    effective_area_id = (
+                        str(device_area_id)
+                        if device_area_id
+                        else None
+                    )
+                    source = (
+                        "device"
+                        if effective_area_id
+                        else ""
+                    )
+
+                if effective_area_id != selected_area_id:
+                    continue
+
+                matching_states.append(state)
+                area_source_by_entity[
+                    entity_id
+                ] = source
+
+            states = matching_states
 
         if domain:
             normalized_domain = (
@@ -1458,11 +1547,22 @@ def entities(
                 ]
             )
 
+            if area:
+                row.append(
+                    area_source_by_entity.get(
+                        state["entity_id"],
+                        "",
+                    )
+                )
+
             table.add_row(*row)
 
         console.print(table)
 
-    except HomeAssistantError as exc:
+    except (
+        HomeAssistantError,
+        ValueError,
+    ) as exc:
         console.print(
             f"[red]Error:[/red] {exc}"
         )
