@@ -109,6 +109,7 @@ class HomeAssistantClient:
                 self._websocket_url(),
                 open_timeout=10.0,
                 close_timeout=2.0,
+                max_size=16 * 1024 * 1024,
             ) as websocket:
                 hello = self._receive_websocket_json(
                     websocket
