@@ -1,4 +1,9 @@
+import json
+from urllib.parse import urlsplit, urlunsplit
+
 import httpx
+from websockets.exceptions import WebSocketException
+from websockets.sync.client import connect
 
 
 class HomeAssistantError(Exception):
@@ -8,6 +13,7 @@ class HomeAssistantError(Exception):
 class HomeAssistantClient:
     def __init__(self, url: str, token: str):
         self.url = url
+        self.token = token
 
         self.client = httpx.Client(
             base_url=url,
@@ -48,6 +54,150 @@ class HomeAssistantClient:
 
         return None
 
+    def _websocket_url(self) -> str:
+        parsed = urlsplit(self.url)
+
+        if parsed.scheme == "http":
+            scheme = "ws"
+        elif parsed.scheme == "https":
+            scheme = "wss"
+        else:
+            raise HomeAssistantError(
+                "Home Assistant URL must use http or https."
+            )
+
+        base_path = parsed.path.rstrip("/")
+        websocket_path = f"{base_path}/api/websocket"
+
+        return urlunsplit(
+            (
+                scheme,
+                parsed.netloc,
+                websocket_path,
+                "",
+                "",
+            )
+        )
+
+    @staticmethod
+    def _receive_websocket_json(websocket) -> dict:
+        raw_message = websocket.recv()
+
+        if isinstance(raw_message, bytes):
+            raw_message = raw_message.decode("utf-8")
+
+        try:
+            message = json.loads(raw_message)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HomeAssistantError(
+                "Home Assistant returned an invalid WebSocket message."
+            ) from exc
+
+        if not isinstance(message, dict):
+            raise HomeAssistantError(
+                "Home Assistant returned an unexpected WebSocket message."
+            )
+
+        return message
+
+    def _websocket_requests(
+        self,
+        request_types: list[str],
+    ) -> list:
+        try:
+            with connect(
+                self._websocket_url(),
+                open_timeout=10.0,
+                close_timeout=2.0,
+            ) as websocket:
+                hello = self._receive_websocket_json(
+                    websocket
+                )
+
+                if hello.get("type") != "auth_required":
+                    raise HomeAssistantError(
+                        "Unexpected Home Assistant WebSocket handshake."
+                    )
+
+                websocket.send(
+                    json.dumps(
+                        {
+                            "type": "auth",
+                            "access_token": self.token,
+                        }
+                    )
+                )
+
+                auth_result = self._receive_websocket_json(
+                    websocket
+                )
+
+                if auth_result.get("type") == "auth_invalid":
+                    raise HomeAssistantError(
+                        "Home Assistant WebSocket authentication failed."
+                    )
+
+                if auth_result.get("type") != "auth_ok":
+                    raise HomeAssistantError(
+                        "Unexpected Home Assistant WebSocket authentication response."
+                    )
+
+                results = []
+
+                for request_id, request_type in enumerate(
+                    request_types,
+                    start=1,
+                ):
+                    websocket.send(
+                        json.dumps(
+                            {
+                                "id": request_id,
+                                "type": request_type,
+                            }
+                        )
+                    )
+
+                    while True:
+                        message = self._receive_websocket_json(
+                            websocket
+                        )
+
+                        if message.get("id") != request_id:
+                            continue
+
+                        if message.get("type") != "result":
+                            continue
+
+                        if not message.get("success"):
+                            error = message.get("error", {})
+                            error_message = error.get(
+                                "message",
+                                "Unknown Home Assistant WebSocket error",
+                            )
+
+                            raise HomeAssistantError(
+                                f"Home Assistant WebSocket request "
+                                f"{request_type} failed: {error_message}"
+                            )
+
+                        results.append(
+                            message.get("result")
+                        )
+                        break
+
+                return results
+
+        except HomeAssistantError:
+            raise
+        except (
+            OSError,
+            TimeoutError,
+            WebSocketException,
+        ) as exc:
+            raise HomeAssistantError(
+                f"Could not connect to Home Assistant WebSocket API: {exc}"
+            ) from exc
+
     def get_states(self):
         return self._request(
             "GET",
@@ -59,6 +209,30 @@ class HomeAssistantClient:
             "GET",
             f"/api/states/{entity_id}",
         )
+
+    def get_areas(self):
+        return self._websocket_requests(
+            [
+                "config/area_registry/list",
+            ]
+        )[0]
+
+    def get_devices(self):
+        return self._websocket_requests(
+            [
+                "config/device_registry/list",
+            ]
+        )[0]
+
+    def get_areas_and_devices(self):
+        areas, devices = self._websocket_requests(
+            [
+                "config/area_registry/list",
+                "config/device_registry/list",
+            ]
+        )
+
+        return areas, devices
 
     def call_service(
         self,
