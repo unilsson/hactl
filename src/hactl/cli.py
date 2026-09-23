@@ -1176,6 +1176,177 @@ def devices(
         client.close()
 
 
+@app.command("entity-area")
+def entity_area(
+    name: AliasName,
+    area: str | None = typer.Argument(
+        None,
+        help=(
+            "Area name or area ID to assign. "
+            "Omit to show the current assignment."
+        ),
+    ),
+    clear: bool = typer.Option(
+        False,
+        "--clear",
+        help=(
+            "Remove the entity-level area assignment. "
+            "The entity may then inherit its device area."
+        ),
+    ),
+):
+    """Show or change the Home Assistant area for an entity."""
+
+    if clear and area is not None:
+        console.print(
+            "[red]Error:[/red] AREA and --clear cannot be used together."
+        )
+        raise typer.Exit(1)
+
+    config, client = get_client()
+
+    entity_id = resolve_entity(
+        name,
+        config.aliases,
+    )
+
+    try:
+        area_entries, device_entries, entity_entries = (
+            client.get_registry_data()
+        )
+
+        entity_by_id = {
+            entry.get("entity_id"): entry
+            for entry in entity_entries
+        }
+
+        entity_entry = entity_by_id.get(
+            entity_id
+        )
+
+        if entity_entry is None:
+            raise ValueError(
+                f"{entity_id} is not present in the Home Assistant entity registry."
+            )
+
+        area_by_id = {
+            entry.get("area_id"): entry
+            for entry in area_entries
+        }
+        device_by_id = {
+            entry.get("id"): entry
+            for entry in device_entries
+        }
+
+        def area_label(
+            area_id: str | None,
+        ) -> str:
+            if not area_id:
+                return "none"
+
+            area_entry = area_by_id.get(
+                area_id
+            )
+
+            if not area_entry:
+                return area_id
+
+            return str(
+                area_entry.get("name")
+                or area_id
+            )
+
+        explicit_area_id = entity_entry.get(
+            "area_id"
+        )
+        device_id = entity_entry.get(
+            "device_id"
+        )
+        device_entry = device_by_id.get(
+            device_id
+        )
+        device_area_id = (
+            device_entry.get("area_id")
+            if device_entry
+            else None
+        )
+
+        if area is None and not clear:
+            console.print(
+                f"[bold]{entity_id}[/bold]"
+            )
+
+            if explicit_area_id:
+                console.print(
+                    "Area: "
+                    f"{area_label(explicit_area_id)} "
+                    "[dim](entity assignment)[/dim]"
+                )
+            elif device_area_id:
+                console.print(
+                    "Area: "
+                    f"{area_label(device_area_id)} "
+                    "[dim](inherited from device)[/dim]"
+                )
+            else:
+                console.print(
+                    "Area: none"
+                )
+
+            return
+
+        if clear:
+            client.update_entity_area(
+                entity_id,
+                None,
+            )
+
+            if device_area_id:
+                console.print(
+                    f"[green]✓[/green] Cleared entity area for "
+                    f"{entity_id}; effective area is now "
+                    f"{area_label(device_area_id)} "
+                    "(inherited from device)."
+                )
+            else:
+                console.print(
+                    f"[green]✓[/green] Cleared entity area for "
+                    f"{entity_id}; it now has no area."
+                )
+
+            return
+
+        selected_area = resolve_area(
+            area,
+            area_entries,
+        )
+        selected_area_id = str(
+            selected_area.get("area_id")
+        )
+
+        client.update_entity_area(
+            entity_id,
+            selected_area_id,
+        )
+
+        console.print(
+            f"[green]✓[/green] {entity_id} → "
+            f"{selected_area.get('name', selected_area_id)}"
+        )
+
+    except (
+        HomeAssistantError,
+        ValueError,
+    ) as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    finally:
+        client.close()
+
+
 @app.command()
 def entities(
     domain: str | None = typer.Option(
