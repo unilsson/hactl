@@ -102,7 +102,7 @@ class HomeAssistantClient:
 
     def _websocket_requests(
         self,
-        request_types: list[str],
+        requests: list[str | dict],
     ) -> list:
         try:
             with connect(
@@ -144,17 +144,27 @@ class HomeAssistantClient:
 
                 results = []
 
-                for request_id, request_type in enumerate(
-                    request_types,
+                for request_id, request in enumerate(
+                    requests,
                     start=1,
                 ):
-                    websocket.send(
-                        json.dumps(
-                            {
-                                "id": request_id,
-                                "type": request_type,
-                            }
+                    if isinstance(request, str):
+                        payload = {
+                            "type": request,
+                        }
+                    else:
+                        payload = dict(request)
+
+                    request_type = str(
+                        payload.get(
+                            "type",
+                            "",
                         )
+                    )
+                    payload["id"] = request_id
+
+                    websocket.send(
+                        json.dumps(payload)
                     )
 
                     while True:
@@ -233,6 +243,39 @@ class HomeAssistantClient:
         )
 
         return areas, devices
+
+    def get_entity_registry(self):
+        return self._websocket_requests(
+            [
+                "config/entity_registry/list",
+            ]
+        )[0]
+
+    def get_registry_data(self):
+        areas, devices, entities = self._websocket_requests(
+            [
+                "config/area_registry/list",
+                "config/device_registry/list",
+                "config/entity_registry/list",
+            ]
+        )
+
+        return areas, devices, entities
+
+    def update_entity_area(
+        self,
+        entity_id: str,
+        area_id: str | None,
+    ):
+        return self._websocket_requests(
+            [
+                {
+                    "type": "config/entity_registry/update",
+                    "entity_id": entity_id,
+                    "area_id": area_id,
+                }
+            ]
+        )[0]
 
     def call_service(
         self,
