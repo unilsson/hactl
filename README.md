@@ -431,6 +431,8 @@ hactl entities --domain DOMAIN
 hactl entities -d DOMAIN
 hactl entities --class DEVICE_CLASS
 hactl entities -c DEVICE_CLASS
+hactl entities --area AREA
+hactl entities -a AREA
 hactl entities --aliased
 ```
 
@@ -440,6 +442,7 @@ Options:
 |---|---|---|
 | `--domain DOMAIN` | `-d DOMAIN` | Only show entities from a Home Assistant domain |
 | `--class DEVICE_CLASS` | `-c DEVICE_CLASS` | Only show entities with a particular device class |
+| `--area AREA` | `-a AREA` | Only show entities whose effective Home Assistant area matches the area name or ID |
 | `--aliased` | — | Only show entities configured under `[aliases]` |
 
 Examples:
@@ -451,6 +454,8 @@ hactl entities --domain sensor
 hactl entities -d binary_sensor
 hactl entities -d sensor --class temperature
 hactl entities -d sensor -c temperature
+hactl entities --area Vardagsrum
+hactl entities -a Vardagsrum -d light
 hactl entities --aliased -c door
 hactl entities -d binary_sensor -c door
 hactl entities --aliased
@@ -465,11 +470,17 @@ hactl entities -d 'light.*'
 
 The output is sorted by entity ID. When `--aliased` is used, an additional `Alias` column is shown.
 
+When `--area` is used, hactl evaluates the entity's effective area: an explicit
+entity-level area wins, otherwise the parent device's area is inherited. The
+result includes an `Area source` column showing `entity` or `device`.
+
 Filters can be combined. For example:
 
 ```bash
 hactl entities --aliased -c door
 hactl entities --aliased -d sensor -c temperature
+hactl entities --area Vardagsrum -d light
+hactl entities --area Vardagsrum --aliased
 ```
 
 This makes it possible to inspect only the curated entities you have added to `[aliases]`.
@@ -511,6 +522,17 @@ Name | Manufacturer | Model | Device ID
 ```
 
 This command reports the device registry's direct `area_id` assignment.
+
+To list every entity whose effective area is a specific area, including entities
+that inherit the area from their parent device:
+
+```bash
+hactl entities --area Vardagsrum
+hactl entities --area Vardagsrum -d light
+```
+
+The `Area source` column identifies whether the matching area comes from an
+explicit entity assignment or from the parent device.
 
 ### Entity area assignment
 
@@ -671,6 +693,7 @@ hactl entities -d sensor
 hactl entities -d sensor -c temperature
 hactl areas
 hactl devices --area Vardagsrum
+hactl entities --area Vardagsrum
 hactl entity-area light.bordslampa Vardagsrum
 hactl find temperature
 hactl status vardagsrum-temp
