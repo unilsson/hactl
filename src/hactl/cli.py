@@ -355,9 +355,6 @@ def list_action_domain(domain: str) -> None:
         table.add_column("Entity")
         table.add_column("State")
         table.add_column("Name")
-
-        if area:
-            table.add_column("Area source")
         table.add_column("Last triggered")
 
         for state in sorted(
@@ -1515,6 +1512,9 @@ def entities(
         table.add_column("Entity")
         table.add_column("State")
         table.add_column("Name")
+
+        if area:
+            table.add_column("Area source")
 
         for state in sorted(
             states,
