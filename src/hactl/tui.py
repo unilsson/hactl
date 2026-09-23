@@ -25,6 +25,7 @@ from hactl.cli import (
     entity_domain,
     format_state_value,
     get_brightness_percent,
+    resolve_area,
     wait_for_brightness,
     wait_for_state,
 )
@@ -187,6 +188,212 @@ class AliasScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class AreaScreen(ModalScreen[tuple[bool, str | None]]):
+    """Dialog for assigning an entity to a Home Assistant area."""
+
+    CSS = """
+    AreaScreen {
+        align: center middle;
+    }
+
+    #area-dialog {
+        grid-size: 2;
+        grid-gutter: 1 2;
+        grid-rows: auto auto auto auto auto 3;
+        width: 72;
+        height: auto;
+        padding: 1 2;
+        border: thick $background 80%;
+        background: $surface;
+    }
+
+    #area-title,
+    #area-entity,
+    #area-current,
+    #area-input,
+    #area-error {
+        column-span: 2;
+    }
+
+    #area-title {
+        text-style: bold;
+    }
+
+    #area-error {
+        color: $error;
+        min-height: 1;
+    }
+
+    #area-dialog Button {
+        width: 100%;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        entity_id: str,
+        areas: list[dict],
+        current_area_id: str | None,
+        inherited_area_id: str | None,
+    ):
+        super().__init__()
+        self.entity_id = entity_id
+        self.areas = areas
+        self.current_area_id = current_area_id
+        self.inherited_area_id = inherited_area_id
+
+    def area_name(
+        self,
+        area_id: str | None,
+    ) -> str:
+        if not area_id:
+            return "none"
+
+        for area in self.areas:
+            if area.get("area_id") == area_id:
+                return str(
+                    area.get("name")
+                    or area_id
+                )
+
+        return area_id
+
+    def compose(self) -> ComposeResult:
+        current_text = (
+            f"{self.area_name(self.current_area_id)} "
+            "(entity assignment)"
+            if self.current_area_id
+            else (
+                f"{self.area_name(self.inherited_area_id)} "
+                "(inherited from device)"
+                if self.inherited_area_id
+                else "none"
+            )
+        )
+
+        input_value = (
+            self.area_name(self.current_area_id)
+            if self.current_area_id
+            else ""
+        )
+
+        yield Grid(
+            Label(
+                "Assign Home Assistant area",
+                id="area-title",
+            ),
+            Label(
+                f"Entity: {self.entity_id}",
+                id="area-entity",
+            ),
+            Label(
+                f"Current area: {current_text}",
+                id="area-current",
+            ),
+            Input(
+                value=input_value,
+                placeholder=(
+                    "Area name or ID; blank clears entity override"
+                ),
+                id="area-input",
+            ),
+            Static(
+                "",
+                id="area-error",
+            ),
+            Button(
+                "Save",
+                variant="primary",
+                id="area-save",
+            ),
+            Button(
+                "Cancel",
+                id="area-cancel",
+            ),
+            id="area-dialog",
+        )
+
+    def on_mount(self) -> None:
+        area_input = self.query_one(
+            "#area-input",
+            Input,
+        )
+        area_input.focus()
+        area_input.cursor_position = len(
+            area_input.value
+        )
+
+    def submit_area(self) -> None:
+        area_input = self.query_one(
+            "#area-input",
+            Input,
+        )
+        value = area_input.value.strip()
+
+        if not value:
+            self.dismiss(
+                (
+                    True,
+                    None,
+                )
+            )
+            return
+
+        try:
+            selected_area = resolve_area(
+                value,
+                self.areas,
+            )
+        except ValueError as exc:
+            self.query_one(
+                "#area-error",
+                Static,
+            ).update(str(exc))
+            return
+
+        self.dismiss(
+            (
+                True,
+                str(
+                    selected_area.get("area_id")
+                ),
+            )
+        )
+
+    def on_input_submitted(
+        self,
+        event: Input.Submitted,
+    ) -> None:
+        if event.input.id == "area-input":
+            self.submit_area()
+
+    def on_button_pressed(
+        self,
+        event: Button.Pressed,
+    ) -> None:
+        if event.button.id == "area-save":
+            self.submit_area()
+        else:
+            self.dismiss(
+                (
+                    False,
+                    None,
+                )
+            )
+
+    def action_cancel(self) -> None:
+        self.dismiss(
+            (
+                False,
+                None,
+            )
+        )
+
+
 class ConfirmRemoveAliasScreen(ModalScreen[bool]):
     """Confirm removal of an alias."""
 
@@ -320,6 +527,7 @@ class HactlApp(App):
         Binding("r", "refresh", "Refresh"),
         Binding("a", "alias_selected", "Alias"),
         Binding("d", "remove_alias_selected", "Remove alias"),
+        Binding("m", "area_selected", "Area"),
         Binding("s", "cycle_sort", "Sort"),
         Binding("x", "run_selected", "Run"),
         Binding("space", "toggle_selected", "Toggle"),
@@ -342,6 +550,10 @@ class HactlApp(App):
         self.aliases_only = True
         self.sort_mode = "alias"
         self.selected_entity_id: str | None = None
+        self.areas: list[dict] = []
+        self.area_by_id: dict[str, dict] = {}
+        self.devices: dict[str, dict] = {}
+        self.entity_registry: dict[str, dict] = {}
 
         self.alias_by_entity = {
             entity_id: alias
@@ -385,6 +597,7 @@ class HactlApp(App):
             yield Button("On", id="action-on")
             yield Button("Off", id="action-off")
             yield Button("Toggle", id="action-toggle")
+            yield Button("Area", id="action-area")
             yield Button("-10%", id="action-dim")
             yield Button("+10%", id="action-brighten")
 
@@ -405,6 +618,7 @@ class HactlApp(App):
             "Name",
         )
 
+        self.refresh_registry_data()
         self.refresh_states()
         table.focus()
 
@@ -413,6 +627,106 @@ class HactlApp(App):
 
     def set_status(self, message: str) -> None:
         self.query_one("#status-bar", Static).update(message)
+
+    def refresh_registry_data(self) -> None:
+        try:
+            areas, devices, entities = (
+                self.client.get_registry_data()
+            )
+        except HomeAssistantError as exc:
+            self.set_status(
+                f"Could not load area registry: {exc}"
+            )
+            return
+
+        self.areas = areas
+        self.area_by_id = {
+            str(area.get("area_id")): area
+            for area in areas
+            if area.get("area_id")
+        }
+        self.devices = {
+            str(device.get("id")): device
+            for device in devices
+            if device.get("id")
+        }
+        self.entity_registry = {
+            str(entity.get("entity_id")): entity
+            for entity in entities
+            if entity.get("entity_id")
+        }
+
+    def area_name(
+        self,
+        area_id: str | None,
+    ) -> str | None:
+        if not area_id:
+            return None
+
+        area = self.area_by_id.get(
+            area_id
+        )
+
+        if not area:
+            return area_id
+
+        return str(
+            area.get("name")
+            or area_id
+        )
+
+    def entity_area_info(
+        self,
+        entity_id: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        entry = self.entity_registry.get(
+            entity_id
+        )
+
+        if not entry:
+            return (
+                None,
+                None,
+                None,
+            )
+
+        explicit_area_id = entry.get(
+            "area_id"
+        )
+
+        if explicit_area_id:
+            area_id = str(explicit_area_id)
+            return (
+                area_id,
+                self.area_name(area_id),
+                "entity",
+            )
+
+        device_id = entry.get(
+            "device_id"
+        )
+        device = self.devices.get(
+            str(device_id)
+        ) if device_id else None
+        device_area_id = (
+            device.get("area_id")
+            if device
+            else None
+        )
+
+        if device_area_id:
+            area_id = str(device_area_id)
+            return (
+                area_id,
+                self.area_name(area_id),
+                "device",
+            )
+
+        return (
+            None,
+            None,
+            None,
+        )
 
     def visible_states(self) -> list[dict]:
         query = self.search_query.casefold().strip()
@@ -653,6 +967,26 @@ class HactlApp(App):
         if alias:
             lines.append(f"Alias: {alias}")
 
+        _, area_name, area_source = (
+            self.entity_area_info(
+                entity_id
+            )
+        )
+
+        if area_name:
+            source_label = (
+                "entity"
+                if area_source == "entity"
+                else "device"
+            )
+            lines.append(
+                f"Area: {area_name} ({source_label})"
+            )
+        else:
+            lines.append(
+                "Area: none"
+            )
+
         if device_class:
             lines.append(
                 f"Device class: {device_class}"
@@ -754,6 +1088,10 @@ class HactlApp(App):
 
         if button_id == "action-run":
             self.run_selected()
+            return
+
+        if button_id == "action-area":
+            self.action_area_selected()
             return
 
         actions = {
@@ -1111,6 +1449,109 @@ class HactlApp(App):
             alias_removed,
         )
 
+    def action_area_selected(self) -> None:
+        state = self.selected_state()
+
+        if not state:
+            return
+
+        entity_id = state["entity_id"]
+        entity_entry = self.entity_registry.get(
+            entity_id
+        )
+
+        if entity_entry is None:
+            self.set_status(
+                f"{entity_id} is not present in the Home Assistant entity registry"
+            )
+            return
+
+        explicit_area_id = entity_entry.get(
+            "area_id"
+        )
+        device_id = entity_entry.get(
+            "device_id"
+        )
+        device = self.devices.get(
+            str(device_id)
+        ) if device_id else None
+        inherited_area_id = (
+            device.get("area_id")
+            if device
+            else None
+        )
+
+        def area_saved(
+            result: tuple[bool, str | None],
+        ) -> None:
+            confirmed, area_id = result
+
+            if not confirmed:
+                self.query_one(
+                    "#entities",
+                    DataTable,
+                ).focus()
+                return
+
+            try:
+                self.client.update_entity_area(
+                    entity_id,
+                    area_id,
+                )
+            except HomeAssistantError as exc:
+                self.set_status(
+                    f"Could not update area: {exc}"
+                )
+                return
+
+            self.refresh_registry_data()
+            self.selected_entity_id = entity_id
+            self.update_details()
+            self.query_one(
+                "#entities",
+                DataTable,
+            ).focus()
+
+            if area_id:
+                self.set_status(
+                    f"{entity_id} → "
+                    f"{self.area_name(area_id) or area_id}"
+                )
+            else:
+                _, effective_name, source = (
+                    self.entity_area_info(
+                        entity_id
+                    )
+                )
+
+                if effective_name and source == "device":
+                    self.set_status(
+                        f"Entity area cleared; {entity_id} now inherits "
+                        f"{effective_name} from its device"
+                    )
+                else:
+                    self.set_status(
+                        f"Entity area cleared for {entity_id}"
+                    )
+
+        self.push_screen(
+            AreaScreen(
+                entity_id,
+                self.areas,
+                (
+                    str(explicit_area_id)
+                    if explicit_area_id
+                    else None
+                ),
+                (
+                    str(inherited_area_id)
+                    if inherited_area_id
+                    else None
+                ),
+            ),
+            area_saved,
+        )
+
     def action_cycle_sort(self) -> None:
         sort_modes = [
             "alias",
@@ -1137,6 +1578,7 @@ class HactlApp(App):
         self.query_one("#entities", DataTable).focus()
 
     def action_refresh(self) -> None:
+        self.refresh_registry_data()
         self.refresh_states(
             self.selected_entity_id
         )
