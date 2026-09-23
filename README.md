@@ -257,6 +257,8 @@ The complete CLI currently consists of:
 | Brightness | `hactl brightness NAME PERCENT` | Set a light to 0-100% |
 | Find | `hactl find SEARCH` | Search Home Assistant entities |
 | Entities | `hactl entities [OPTIONS]` | List entities |
+| Areas | `hactl areas` | List Home Assistant areas |
+| Devices | `hactl devices --area AREA` | List devices assigned directly to an area |
 | Alias | `hactl alias ALIAS ENTITY_ID` | Create or change an alias |
 | Unalias | `hactl unalias ALIAS` | Remove an alias |
 | Aliases | `hactl aliases [--check]` | List aliases and optionally validate targets |
@@ -448,6 +450,8 @@ hactl entities --domain sensor
 hactl entities -d binary_sensor
 hactl entities -d sensor --class temperature
 hactl entities -d sensor -c temperature
+hactl areas
+hactl devices --area Vardagsrum
 hactl entities --aliased -c door
 hactl entities -d binary_sensor -c door
 hactl entities --aliased
@@ -470,6 +474,47 @@ hactl entities --aliased -d sensor -c temperature
 ```
 
 This makes it possible to inspect only the curated entities you have added to `[aliases]`.
+
+## Areas and devices
+
+hactl can inspect Home Assistant's area and device registries through the
+Home Assistant WebSocket API.
+
+List every configured area:
+
+```bash
+hactl areas
+```
+
+Example output:
+
+```text
+Name          Area ID
+────────────────────────────
+Kök           kok
+Vardagsrum    vardagsrum
+```
+
+List devices assigned directly to an area:
+
+```bash
+hactl devices --area Vardagsrum
+hactl devices -a vardagsrum
+```
+
+The area argument accepts either the displayed area name or the Home Assistant
+area ID. Area aliases are also accepted when Home Assistant provides them.
+
+The device table shows:
+
+```text
+Name | Manufacturer | Model | Device ID
+```
+
+This command reports the device registry's direct `area_id` assignment.
+Home Assistant can also assign an individual entity to a different area than
+its parent device; such entity-level overrides are intentionally not included
+in this first area/device implementation.
 
 ## Scenes, scripts, and automations
 
@@ -867,9 +912,9 @@ The TUI uses the same confirmation logic.
 
 ## Home Assistant API
 
-hactl currently uses the Home Assistant REST API.
+hactl uses both the Home Assistant REST API and WebSocket API.
 
-The client uses:
+The REST client uses:
 
 ```text
 GET  /api/states
@@ -877,9 +922,23 @@ GET  /api/states/<entity_id>
 POST /api/services/<domain>/<service>
 ```
 
-Authentication is sent using the Home Assistant long-lived access token as a Bearer token.
+Area and device registry inspection uses the WebSocket endpoint:
 
-The default HTTP timeout is 10 seconds.
+```text
+/api/websocket
+```
+
+with these Home Assistant WebSocket commands:
+
+```text
+config/area_registry/list
+config/device_registry/list
+```
+
+The same Home Assistant long-lived access token is used for both REST and
+WebSocket authentication.
+
+The default HTTP/WebSocket connection timeout is 10 seconds.
 
 ## Configuration example
 
@@ -1048,6 +1107,7 @@ so changes in the source tree are immediately available to the installed command
 The Sprint 7 implementation currently focuses on:
 
 - Home Assistant entity discovery
+- Home Assistant area listing and device-to-area inspection
 - full alias lifecycle from CLI and TUI
 - alias target validation
 - shell completion for configured aliases
