@@ -259,6 +259,7 @@ The complete CLI currently consists of:
 | Entities | `hactl entities [OPTIONS]` | List entities |
 | Areas | `hactl areas` | List Home Assistant areas |
 | Devices | `hactl devices --area AREA` | List devices assigned directly to an area |
+| Entity area | `hactl entity-area NAME [AREA]` | Show, assign, reassign, or clear an entity's area |
 | Alias | `hactl alias ALIAS ENTITY_ID` | Create or change an alias |
 | Unalias | `hactl unalias ALIAS` | Remove an alias |
 | Aliases | `hactl aliases [--check]` | List aliases and optionally validate targets |
@@ -510,9 +511,43 @@ Name | Manufacturer | Model | Device ID
 ```
 
 This command reports the device registry's direct `area_id` assignment.
-Home Assistant can also assign an individual entity to a different area than
-its parent device; such entity-level overrides are intentionally not included
-in this first area/device implementation.
+
+### Entity area assignment
+
+Inspect the effective area for an entity:
+
+```bash
+hactl entity-area light.bordslampa
+hactl entity-area veranda
+```
+
+If the entity has its own area assignment, hactl reports it as an entity
+assignment. Otherwise, if its parent device has an area, hactl reports that
+the area is inherited from the device.
+
+Assign or reassign an entity to an area:
+
+```bash
+hactl entity-area light.bordslampa Vardagsrum
+hactl entity-area veranda Kök
+```
+
+The entity argument may be a normal hactl alias or a full Home Assistant
+entity ID. The area argument accepts area name, area ID, or a Home Assistant
+area alias.
+
+Remove the entity-level override:
+
+```bash
+hactl entity-area light.bordslampa --clear
+```
+
+After clearing an entity-level assignment, the entity inherits its parent
+device's area when the device has one; otherwise it has no area.
+
+Changing entity registry data through Home Assistant requires an administrator
+account. The long-lived token used by hactl must therefore belong to a Home
+Assistant administrator for area changes to succeed.
 
 ## Scenes, scripts, and automations
 
@@ -636,6 +671,7 @@ hactl entities -d sensor
 hactl entities -d sensor -c temperature
 hactl areas
 hactl devices --area Vardagsrum
+hactl entity-area light.bordslampa Vardagsrum
 hactl find temperature
 hactl status vardagsrum-temp
 ```
@@ -800,6 +836,7 @@ Selecting an entity shows a detail panel containing available information such a
 - alias
 - device class
 - brightness for lights
+- effective Home Assistant area and whether it comes from the entity or device
 - last-triggered time when Home Assistant provides it
 
 ### Controls
@@ -824,6 +861,7 @@ Available control buttons are:
 - On
 - Off
 - Toggle
+- Area
 - -10%
 - +10%
 
@@ -839,6 +877,7 @@ Lights that explicitly report only `onoff` capability are treated as non-dimmabl
 | `Esc` | Return focus to entity list |
 | `a` | Add or change alias for selected entity |
 | `d` | Remove the selected entity's alias after confirmation |
+| `m` | Assign or reassign the selected entity to a Home Assistant area |
 | `s` | Cycle sort order: alias, name, state, entity |
 | `x` | Run selected scene/script or trigger selected automation |
 | `Space` | Toggle selected light, switch, or automation |
@@ -933,6 +972,8 @@ with these Home Assistant WebSocket commands:
 ```text
 config/area_registry/list
 config/device_registry/list
+config/entity_registry/list
+config/entity_registry/update
 ```
 
 The same Home Assistant long-lived access token is used for both REST and
@@ -1108,6 +1149,7 @@ The current implementation focuses on:
 
 - Home Assistant entity discovery
 - Home Assistant area listing and device-to-area inspection
+- entity-level area inspection, assignment, reassignment, and clearing from CLI and TUI
 - full alias lifecycle from CLI and TUI
 - alias target validation
 - shell completion for configured aliases
