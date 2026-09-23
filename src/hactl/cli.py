@@ -74,6 +74,44 @@ def resolve_entity(name: str, aliases: dict[str, str]) -> str:
     return aliases.get(name, name)
 
 
+def resolve_area(name: str, areas: list[dict]) -> dict:
+    normalized_name = name.casefold()
+
+    direct_matches = [
+        area
+        for area in areas
+        if str(area.get("area_id", "")).casefold()
+        == normalized_name
+        or str(area.get("name", "")).casefold()
+        == normalized_name
+    ]
+
+    if len(direct_matches) == 1:
+        return direct_matches[0]
+
+    alias_matches = [
+        area
+        for area in areas
+        if normalized_name
+        in {
+            str(alias).casefold()
+            for alias in area.get("aliases", [])
+        }
+    ]
+
+    if len(alias_matches) == 1:
+        return alias_matches[0]
+
+    if len(direct_matches) + len(alias_matches) > 1:
+        raise ValueError(
+            f"Area '{name}' is ambiguous."
+        )
+
+    raise ValueError(
+        f"Unknown area: {name}. Run 'hactl areas' to list available areas."
+    )
+
+
 def entity_domain(entity_id: str) -> str:
     if "." not in entity_id:
         raise ValueError(
@@ -1002,6 +1040,140 @@ def aliases(
         table.add_row(*row)
 
     console.print(table)
+
+
+@app.command()
+def areas():
+    """List Home Assistant areas."""
+
+    _, client = get_client()
+
+    try:
+        area_entries = client.get_areas()
+
+        table = Table()
+        table.add_column("Name")
+        table.add_column("Area ID")
+
+        for area in sorted(
+            area_entries,
+            key=lambda item: str(
+                item.get("name", "")
+            ).casefold(),
+        ):
+            table.add_row(
+                str(area.get("name", "")),
+                str(area.get("area_id", "")),
+            )
+
+        console.print(table)
+
+    except HomeAssistantError as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    finally:
+        client.close()
+
+
+@app.command()
+def devices(
+    area: str = typer.Option(
+        ...,
+        "--area",
+        "-a",
+        help=(
+            "Only list devices assigned directly to this "
+            "Home Assistant area (name or area ID)."
+        ),
+    ),
+):
+    """List devices assigned to a Home Assistant area."""
+
+    _, client = get_client()
+
+    try:
+        area_entries, device_entries = (
+            client.get_areas_and_devices()
+        )
+
+        selected_area = resolve_area(
+            area,
+            area_entries,
+        )
+
+        area_id = selected_area.get("area_id")
+        area_name = selected_area.get(
+            "name",
+            area_id,
+        )
+
+        matching_devices = [
+            device
+            for device in device_entries
+            if device.get("area_id") == area_id
+        ]
+
+        console.print(
+            f"[bold]{area_name}[/bold] "
+            f"([dim]{area_id}[/dim])"
+        )
+
+        if not matching_devices:
+            console.print(
+                "[yellow]No devices are assigned directly "
+                "to this area.[/yellow]"
+            )
+            return
+
+        table = Table()
+        table.add_column("Name")
+        table.add_column("Manufacturer")
+        table.add_column("Model")
+        table.add_column("Device ID")
+
+        for device in sorted(
+            matching_devices,
+            key=lambda item: str(
+                item.get("name_by_user")
+                or item.get("name")
+                or item.get("id")
+                or ""
+            ).casefold(),
+        ):
+            table.add_row(
+                str(
+                    device.get("name_by_user")
+                    or device.get("name")
+                    or device.get("id")
+                    or ""
+                ),
+                str(
+                    device.get("manufacturer")
+                    or ""
+                ),
+                str(
+                    device.get("model")
+                    or ""
+                ),
+                str(device.get("id") or ""),
+            )
+
+        console.print(table)
+
+    except (
+        HomeAssistantError,
+        ValueError,
+    ) as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}"
+        )
+        raise typer.Exit(1)
+
+    finally:
+        client.close()
 
 
 @app.command()
