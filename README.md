@@ -31,45 +31,74 @@ The Python dependencies are installed from `pyproject.toml` and currently includ
 - `typer`
 - `textual`
 - `tomlkit`
+- `websockets`
 
 ## Installation
 
-Clone the repository:
+### Recommended: pipx
+
+For normal day-to-day use, install `hactl` with `pipx`. This gives hactl its own isolated Python environment while exposing the `hactl` command in your normal shell.
+
+On Ubuntu/Debian:
 
 ```bash
-git clone https://github.com/unilsson/hactl.git
-cd hactl
+sudo apt install pipx
+pipx ensurepath
 ```
 
-Create and activate a virtual environment:
+Install the current `main` version directly from GitHub:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+pipx install git+https://github.com/unilsson/hactl.git
 ```
 
-Install hactl in editable mode:
-
-```bash
-pip install -e .
-```
-
-You can now run:
+You can then run hactl from any directory without activating a virtual environment:
 
 ```bash
 hactl --help
 ```
 
-### Using hactl in a new shell
-
-The virtual environment must be activated in each new shell:
+When a new version has been merged to `main`, upgrade the installed copy with:
 
 ```bash
-cd ~/Development/hactl
-source .venv/bin/activate
+pipx upgrade hactl
 ```
 
-After that, `hactl` is available in that shell.
+The local configuration and Home Assistant credentials under `~/.config/hactl/` are separate from the pipx environment and are not removed by a normal pipx upgrade or reinstall.
+
+### Development installation
+
+For development, clone the repository and use a project-local virtual environment:
+
+```bash
+git clone https://github.com/unilsson/hactl.git
+cd hactl
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+The editable install means the `hactl` command in the active `.venv` uses the source code from the working tree directly.
+
+While the development environment is active, verify which copy is being used with:
+
+```bash
+which hactl
+```
+
+It should point to the project environment, for example:
+
+```text
+/home/user/Development/hactl/.venv/bin/hactl
+```
+
+After:
+
+```bash
+deactivate
+```
+
+the shell falls back to the pipx-installed stable version, normally exposed through `~/.local/bin/hactl`.
 
 ## Configuration
 
@@ -1041,7 +1070,22 @@ Remember that the token belongs in the separate `credentials` file, never in `co
 
 ### `hactl: command not found`
 
-If you installed the project in its local virtual environment, activate it:
+For a normal pipx installation, check:
+
+```bash
+pipx list
+which hactl
+```
+
+If pipx reports that `~/.local/bin` is not in `PATH`, run:
+
+```bash
+pipx ensurepath
+```
+
+and start a new shell.
+
+For a development checkout, activate the project virtual environment:
 
 ```bash
 cd ~/Development/hactl
@@ -1051,10 +1095,11 @@ source .venv/bin/activate
 Then check:
 
 ```bash
+which hactl
 hactl --help
 ```
 
-If necessary, reinstall the editable package:
+If necessary, reinstall the editable development package:
 
 ```bash
 pip install -e .
@@ -1161,10 +1206,12 @@ hactl = "hactl.cli:app"
 During development, use:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
-so changes in the source tree are immediately available to the installed command.
+so changes in the source tree are immediately available to the `hactl` command inside that virtual environment. A separate pipx installation can remain installed at the same time as the stable day-to-day version.
 
 ## Current scope
 
